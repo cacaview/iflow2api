@@ -46,6 +46,10 @@ jobs:
           sudo apt-get install -y libgtk-3-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libmpv-dev ninja-build clang
 
       - name: Build with Flet
+        env:
+          PYTHONIOENCODING: utf-8
+          PYTHONUTF8: 1
+        shell: bash
         run: |
           echo "y" | flet build ${{ matrix.platform }} --project iflow2api --module-name iflow2api.gui --product iflow2api
 
