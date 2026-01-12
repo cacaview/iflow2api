@@ -22,6 +22,10 @@ class IFlow2ApiApp:
     def __init__(self, page: ft.Page):
         self.page = page
         self.settings = load_settings()
+
+        # 设置 pubsub 用于线程安全的 UI 更新
+        self.page.pubsub.subscribe(self._on_pubsub_message)
+
         self.server = ServerManager(on_state_change=self._on_server_state_change_threadsafe)
 
         # UI 组件
@@ -240,21 +244,24 @@ class IFlow2ApiApp:
             self.log_list.controls.pop(0)
         self.page.update()
 
+    def _on_pubsub_message(self, message):
+        """处理 pubsub 消息 - 在主线程中执行"""
+        if isinstance(message, dict) and message.get("type") == "server_state":
+            state = message["state"]
+            msg = message["message"]
+            self._on_server_state_change(state, msg)
+
     def _on_server_state_change_threadsafe(self, state: ServerState, message: str):
         """服务状态变化回调 - 线程安全版本，从后台线程调用"""
-        # 使用 page.run_thread_safe 确保 UI 更新在主线程执行
-        def update_ui():
-            self._on_server_state_change(state, message)
-
-        # Flet 的线程安全调用方式
+        # 通过 pubsub 发送消息到主线程
         try:
-            self.page.run_thread_safe(update_ui)
+            self.page.pubsub.send_all({
+                "type": "server_state",
+                "state": state,
+                "message": message
+            })
         except Exception:
-            # 如果 run_thread_safe 不可用，尝试直接调用（可能在主线程）
-            try:
-                self._on_server_state_change(state, message)
-            except Exception:
-                pass
+            pass
 
     def _on_server_state_change(self, state: ServerState, message: str):
         """服务状态变化回调 - 必须在主线程调用"""
