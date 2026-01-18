@@ -28,7 +28,9 @@ class IFlow2ApiApp:
         # 设置 pubsub 用于线程安全的 UI 更新
         self.page.pubsub.subscribe(self._on_pubsub_message)
 
-        self.server = ServerManager(on_state_change=self._on_server_state_change_threadsafe)
+        self.server = ServerManager(
+            on_state_change=self._on_server_state_change_threadsafe
+        )
 
         # UI 组件
         self.status_icon: Optional[ft.Icon] = None
@@ -104,10 +106,12 @@ class IFlow2ApiApp:
         )
 
         server_config = ft.Container(
-            content=ft.Column([
-                ft.Text("服务器配置", weight=ft.FontWeight.BOLD),
-                ft.Row([self.host_field, self.port_field]),
-            ]),
+            content=ft.Column(
+                [
+                    ft.Text("服务器配置", weight=ft.FontWeight.BOLD),
+                    ft.Row([self.host_field, self.port_field]),
+                ]
+            ),
             padding=15,
             border=ft.border.all(1, ft.Colors.OUTLINE),
             border_radius=8,
@@ -127,7 +131,7 @@ class IFlow2ApiApp:
             hint_text="https://apis.iflow.cn/v1",
         )
 
-import_btn = ft.TextButton(
+        import_btn = ft.TextButton(
             "从 iFlow CLI 导入配置",
             icon=ft.Icons.DOWNLOAD,
             on_click=self._import_from_cli,
@@ -141,12 +145,17 @@ import_btn = ft.TextButton(
         )
 
         iflow_config = ft.Container(
-            content=ft.Column([
-                ft.Text("iFlow 配置", weight=ft.FontWeight.BOLD),
-                self.api_key_field,
-                self.base_url_field,
-                ft.Row([import_btn, oauth_login_btn], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
-            ]),
+            content=ft.Column(
+                [
+                    ft.Text("iFlow 配置", weight=ft.FontWeight.BOLD),
+                    self.api_key_field,
+                    self.base_url_field,
+                    ft.Row(
+                        [import_btn, oauth_login_btn],
+                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                    ),
+                ]
+            ),
             padding=15,
             border=ft.border.all(1, ft.Colors.OUTLINE),
             border_radius=8,
@@ -168,12 +177,14 @@ import_btn = ft.TextButton(
         )
 
         app_settings = ft.Container(
-            content=ft.Column([
-                ft.Text("应用设置", weight=ft.FontWeight.BOLD),
-                self.auto_start_checkbox,
-                self.start_minimized_checkbox,
-                self.auto_run_checkbox,
-            ]),
+            content=ft.Column(
+                [
+                    ft.Text("应用设置", weight=ft.FontWeight.BOLD),
+                    self.auto_start_checkbox,
+                    self.start_minimized_checkbox,
+                    self.auto_run_checkbox,
+                ]
+            ),
             padding=15,
             border=ft.border.all(1, ft.Colors.OUTLINE),
             border_radius=8,
@@ -212,16 +223,18 @@ import_btn = ft.TextButton(
         )
 
         log_container = ft.Container(
-            content=ft.Column([
-                ft.Text("日志", weight=ft.FontWeight.BOLD),
-                ft.Container(
-                    content=self.log_list,
-                    height=150,
-                    border=ft.border.all(1, ft.Colors.OUTLINE),
-                    border_radius=8,
-                    padding=10,
-                ),
-            ]),
+            content=ft.Column(
+                [
+                    ft.Text("日志", weight=ft.FontWeight.BOLD),
+                    ft.Container(
+                        content=self.log_list,
+                        height=150,
+                        border=ft.border.all(1, ft.Colors.OUTLINE),
+                        border_radius=8,
+                        padding=10,
+                    ),
+                ]
+            ),
         )
 
         # 组装页面
@@ -264,11 +277,9 @@ import_btn = ft.TextButton(
         """服务状态变化回调 - 线程安全版本，从后台线程调用"""
         # 通过 pubsub 发送消息到主线程
         try:
-            self.page.pubsub.send_all({
-                "type": "server_state",
-                "state": state,
-                "message": message
-            })
+            self.page.pubsub.send_all(
+                {"type": "server_state", "state": state, "message": message}
+            )
         except Exception:
             pass
 
@@ -277,7 +288,10 @@ import_btn = ft.TextButton(
         state_config = {
             ServerState.STOPPED: (ft.Colors.GREY, "服务未运行"),
             ServerState.STARTING: (ft.Colors.ORANGE, "服务启动中..."),
-            ServerState.RUNNING: (ft.Colors.GREEN, f"服务运行中 (http://{self.settings.host}:{self.settings.port})"),
+            ServerState.RUNNING: (
+                ft.Colors.GREEN,
+                f"服务运行中 (http://{self.settings.host}:{self.settings.port})",
+            ),
             ServerState.STOPPING: (ft.Colors.ORANGE, "服务停止中..."),
             ServerState.ERROR: (ft.Colors.RED, f"错误: {message}"),
         }
@@ -338,7 +352,9 @@ import_btn = ft.TextButton(
             self.page.update()
             self._add_log("已从 iFlow CLI 导入配置")
             self.page.open(
-                ft.SnackBar(content=ft.Text("已从 iFlow CLI 导入配置"), bgcolor=ft.Colors.GREEN)
+                ft.SnackBar(
+                    content=ft.Text("已从 iFlow CLI 导入配置"), bgcolor=ft.Colors.GREEN
+                )
             )
         else:
             self._add_log("无法导入 iFlow CLI 配置")
@@ -349,7 +365,7 @@ import_btn = ft.TextButton(
                 )
             )
 
-def _on_auto_start_change(self, e):
+    def _on_auto_start_change(self, e):
         """开机自启动设置变化"""
         success = set_auto_start(e.control.value)
         if success:
@@ -362,6 +378,7 @@ def _on_auto_start_change(self, e):
     def _login_with_iflow_oauth(self, e):
         """使用 iFlow OAuth 登录"""
         from .oauth_login import OAuthLoginHandler
+
         handler = OAuthLoginHandler(self._add_log)
         handler.start_login()
 

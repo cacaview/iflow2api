@@ -38,6 +38,17 @@ class IFlowOAuth:
     ) -> Dict[str, Any]:
         """
         使用授权码获取 OAuth token
+
+        Args:
+            code: OAuth 授权码
+            redirect_uri: 回调地址
+
+        Returns:
+            包含 access_token, refresh_token, expires_in 等字段的字典
+
+        Raises:
+            httpx.HTTPError: HTTP 请求失败
+            ValueError: 响应数据格式错误
         """
         import base64
 
@@ -122,6 +133,16 @@ class IFlowOAuth:
     async def get_user_info(self, access_token: str) -> Dict[str, Any]:
         """
         获取用户信息（包含 API Key）
+
+        Args:
+            access_token: 访问令牌
+
+        Returns:
+            用户信息字典
+
+        Raises:
+            httpx.HTTPError: HTTP 请求失败
+            ValueError: 响应数据格式错误或 access_token 无效
         """
         from urllib.parse import quote
 
@@ -154,6 +175,13 @@ class IFlowOAuth:
     ) -> str:
         """
         生成 OAuth 授权 URL
+
+        Args:
+            redirect_uri: 回调地址
+            state: CSRF 防护令牌
+
+        Returns:
+            OAuth 授权 URL
         """
         import secrets
 
