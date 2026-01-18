@@ -1,4 +1,4 @@
-"""应用配置管理 - 保存/加载用户配置"""
+"""应用配置管理 - 使用 ~/.iflow/settings.json 统一管理配置"""
 
 import json
 import sys
@@ -7,7 +7,7 @@ from typing import Optional
 
 from pydantic import BaseModel
 
-from .config import load_iflow_config, IFlowConfig
+from .config import load_iflow_config, save_iflow_config, IFlowConfig
 
 
 class AppSettings(BaseModel):
@@ -17,64 +17,109 @@ class AppSettings(BaseModel):
     host: str = "0.0.0.0"
     port: int = 8000
 
-    # iFlow 配置
+    # iFlow 配置 (从 ~/.iflow/settings.json 读取)
     api_key: str = ""
     base_url: str = "https://apis.iflow.cn/v1"
 
-    # OAuth 配置
+    # OAuth 配置 (从 ~/.iflow/settings.json 读取)
     auth_type: str = "api-key"  # 认证类型: oauth-iflow, api-key, openai-compatible
     oauth_access_token: str = ""  # OAuth 访问令牌
     oauth_refresh_token: str = ""  # OAuth 刷新令牌
     oauth_expires_at: Optional[str] = None  # OAuth token 过期时间 (ISO 格式)
 
-    # 应用设置
+    # 应用设置 (保存到 ~/.iflow2api/config.json)
     auto_start: bool = False  # 开机自启动
     start_minimized: bool = False  # 启动时最小化
     auto_run_server: bool = False  # 启动时自动运行服务
 
 
 def get_config_dir() -> Path:
-    """获取配置目录"""
+    """获取应用配置目录"""
     return Path.home() / ".iflow2api"
 
 
 def get_config_path() -> Path:
-    """获取配置文件路径"""
+    """获取应用配置文件路径"""
     return get_config_dir() / "config.json"
 
 
 def load_settings() -> AppSettings:
     """加载配置"""
-    config_path = get_config_path()
-
-    if config_path.exists():
-        try:
-            with open(config_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            return AppSettings(**data)
-        except Exception:
-            pass
-
-    # 尝试从 iFlow CLI 配置导入
     settings = AppSettings()
+
+    # 从 ~/.iflow/settings.json 加载 iFlow 配置
     try:
         iflow_config = load_iflow_config()
         settings.api_key = iflow_config.api_key
         settings.base_url = iflow_config.base_url
+        settings.auth_type = iflow_config.auth_type or "api-key"
+        settings.oauth_access_token = iflow_config.oauth_access_token or ""
+        settings.oauth_refresh_token = iflow_config.oauth_refresh_token or ""
+        if iflow_config.oauth_expires_at:
+            settings.oauth_expires_at = iflow_config.oauth_expires_at.isoformat()
     except Exception:
         pass
+
+    # 从 ~/.iflow2api/config.json 加载应用设置
+    app_config_path = get_config_path()
+    if app_config_path.exists():
+        try:
+            with open(app_config_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                # 只加载应用相关的设置
+                if "host" in data:
+                    settings.host = data["host"]
+                if "port" in data:
+                    settings.port = data["port"]
+                if "auto_start" in data:
+                    settings.auto_start = data["auto_start"]
+                if "start_minimized" in data:
+                    settings.start_minimized = data["start_minimized"]
+                if "auto_run_server" in data:
+                    settings.auto_run_server = data["auto_run_server"]
+        except Exception:
+            pass
 
     return settings
 
 
 def save_settings(settings: AppSettings) -> None:
-    """保存配置"""
+    """
+    保存配置
+
+    - 应用设置保存到 ~/.iflow2api/config.json
+    - iFlow 配置保存到 ~/.iflow/settings.json
+    """
+    # 1. 保存应用设置到 ~/.iflow2api/config.json
     config_dir = get_config_dir()
     config_dir.mkdir(parents=True, exist_ok=True)
 
+    app_data = {
+        "host": settings.host,
+        "port": settings.port,
+        "auto_start": settings.auto_start,
+        "start_minimized": settings.start_minimized,
+        "auto_run_server": settings.auto_run_server,
+    }
+
     config_path = get_config_path()
     with open(config_path, "w", encoding="utf-8") as f:
-        json.dump(settings.model_dump(), f, indent=2, ensure_ascii=False)
+        json.dump(app_data, f, indent=2, ensure_ascii=False)
+
+    # 2. 如果 API Key 或 Base URL 发生变化，更新 ~/.iflow/settings.json
+    try:
+        existing_config = load_iflow_config()
+    except (FileNotFoundError, ValueError):
+        existing_config = IFlowConfig(api_key="", base_url="https://apis.iflow.cn/v1")
+
+    # 只在 API Key 或 Base URL 发生变化时更新
+    if (
+        existing_config.api_key != settings.api_key
+        or existing_config.base_url != settings.base_url
+    ):
+        existing_config.api_key = settings.api_key
+        existing_config.base_url = settings.base_url
+        save_iflow_config(existing_config)
 
 
 def get_exe_path() -> str:

@@ -128,3 +128,39 @@ def check_iflow_login() -> bool:
         return bool(config.api_key)
     except (FileNotFoundError, ValueError):
         return False
+
+
+def save_iflow_config(config: IFlowConfig) -> None:
+    """
+    保存 iFlow 配置到 ~/.iflow/settings.json
+
+    Args:
+        config: IFlowConfig 配置对象
+    """
+    config_path = get_iflow_config_path()
+    config_dir = config_path.parent
+    config_dir.mkdir(parents=True, exist_ok=True)
+
+    # 转换为字典
+    data = {
+        "apiKey": config.api_key,
+        "baseUrl": config.base_url,
+    }
+
+    # 添加可选字段
+    if config.model_name:
+        data["modelName"] = config.model_name
+    if config.cna:
+        data["cna"] = config.cna
+    if config.auth_type:
+        data["selectedAuthType"] = config.auth_type
+    if config.oauth_access_token:
+        data["oauth_access_token"] = config.oauth_access_token
+    if config.oauth_refresh_token:
+        data["oauth_refresh_token"] = config.oauth_refresh_token
+    if config.oauth_expires_at:
+        data["oauth_expires_at"] = config.oauth_expires_at.isoformat()
+
+    # 保存到文件
+    with open(config_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)

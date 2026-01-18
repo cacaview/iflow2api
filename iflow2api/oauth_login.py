@@ -7,7 +7,7 @@ from typing import Optional
 
 from .oauth import IFlowOAuth
 from .web_server import OAuthCallbackServer, find_available_port
-from .settings import load_settings, save_settings
+from .config import load_iflow_config, save_iflow_config, IFlowConfig
 
 
 class OAuthLoginHandler:
@@ -66,6 +66,11 @@ class OAuthLoginHandler:
                     self._is_logging_in = False
                     return
 
+                if not code:
+                    self.add_log("OAuth 授权失败: 未收到授权码")
+                    self._is_logging_in = False
+                    return
+
                 self.add_log("收到授权码，正在获取 token...")
 
                 # 5. 获取 token
@@ -85,19 +90,30 @@ class OAuthLoginHandler:
                         if not api_key:
                             raise ValueError("未能获取 API Key")
 
-                        # 保存到配置
-                        settings = load_settings()
-                        settings.auth_type = "oauth-iflow"
-                        settings.api_key = api_key  # 使用从用户信息获取的 API Key
-                        settings.oauth_access_token = token_data.get("access_token", "")
-                        settings.oauth_refresh_token = token_data.get(
+                        # 保存到 ~/.iflow/settings.json
+                        # 尝试加载现有配置
+                        try:
+                            existing_config = load_iflow_config()
+                        except (FileNotFoundError, ValueError):
+                            existing_config = IFlowConfig(
+                                api_key=api_key,
+                                base_url="https://apis.iflow.cn/v1",
+                                auth_type="oauth-iflow",
+                            )
+
+                        # 更新配置
+                        existing_config.api_key = api_key
+                        existing_config.auth_type = "oauth-iflow"
+                        existing_config.oauth_access_token = token_data.get(
+                            "access_token", ""
+                        )
+                        existing_config.oauth_refresh_token = token_data.get(
                             "refresh_token", ""
                         )
                         if token_data.get("expires_at"):
-                            settings.oauth_expires_at = token_data[
-                                "expires_at"
-                            ].isoformat()
-                        save_settings(settings)
+                            existing_config.oauth_expires_at = token_data["expires_at"]
+
+                        save_iflow_config(existing_config)
 
                         self.add_log(
                             f"登录成功！用户: {user_info.get('username', user_info.get('phone', 'Unknown'))}"

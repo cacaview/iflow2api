@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Callable
 
 from .oauth import IFlowOAuth
-from .settings import AppSettings, load_settings, save_settings
+from .config import load_iflow_config, save_iflow_config, IFlowConfig
 
 
 class OAuthTokenRefresher:
@@ -67,25 +67,20 @@ class OAuthTokenRefresher:
         while not self._stop_event.is_set():
             try:
                 # 检查是否需要刷新
-                settings = load_settings()
+                config = load_iflow_config()
 
                 if (
-                    settings.auth_type == "oauth-iflow"
-                    and settings.oauth_refresh_token
-                    and settings.oauth_expires_at
+                    config.auth_type == "oauth-iflow"
+                    and config.oauth_refresh_token
+                    and config.oauth_expires_at
                 ):
-                    # 解析过期时间
-                    try:
-                        expires_at = datetime.fromisoformat(settings.oauth_expires_at)
-                    except (ValueError, TypeError):
-                        expires_at = None
-
-                    if expires_at:
-                        # 检查是否需要刷新
-                        oauth = IFlowOAuth()
-                        if oauth.is_token_expired(expires_at, self.refresh_buffer):
-                            # 需要刷新 token
-                            asyncio.run(self._refresh_token(settings))
+                    # 检查是否需要刷新
+                    oauth = IFlowOAuth()
+                    if oauth.is_token_expired(
+                        config.oauth_expires_at, self.refresh_buffer
+                    ):
+                        # 需要刷新 token
+                        asyncio.run(self._refresh_token(config))
 
             except Exception:
                 # 忽略错误，继续下一次检查
@@ -94,28 +89,30 @@ class OAuthTokenRefresher:
             # 等待下一次检查
             self._stop_event.wait(self.check_interval)
 
-    async def _refresh_token(self, settings: AppSettings):
+    async def _refresh_token(self, config: IFlowConfig):
         """
         刷新 token
 
         Args:
-            settings: 当前设置
+            config: 当前 iFlow 配置
         """
         try:
             oauth = IFlowOAuth()
 
             # 刷新 token
-            token_data = await oauth.refresh_token(settings.oauth_refresh_token)
+            if not config.oauth_refresh_token:
+                return
+            token_data = await oauth.refresh_token(config.oauth_refresh_token)
 
-            # 更新设置
-            settings.oauth_access_token = token_data.get("access_token", "")
+            # 更新配置
+            config.oauth_access_token = token_data.get("access_token", "")
             if token_data.get("refresh_token"):
-                settings.oauth_refresh_token = token_data["refresh_token"]
+                config.oauth_refresh_token = token_data["refresh_token"]
             if token_data.get("expires_at"):
-                settings.oauth_expires_at = token_data["expires_at"].isoformat()
+                config.oauth_expires_at = token_data["expires_at"]
 
-            # 保存设置
-            save_settings(settings)
+            # 保存配置
+            save_iflow_config(config)
 
             # 调用回调
             if self._on_refresh_callback:
@@ -148,23 +145,17 @@ class OAuthTokenRefresher:
             True 表示需要立即刷新
         """
         try:
-            settings = load_settings()
+            config = load_iflow_config()
 
             if (
-                settings.auth_type != "oauth-iflow"
-                or not settings.oauth_refresh_token
-                or not settings.oauth_expires_at
+                config.auth_type != "oauth-iflow"
+                or not config.oauth_refresh_token
+                or not config.oauth_expires_at
             ):
                 return False
 
-            # 解析过期时间
-            try:
-                expires_at = datetime.fromisoformat(settings.oauth_expires_at)
-            except (ValueError, TypeError):
-                return False
-
             oauth = IFlowOAuth()
-            return oauth.is_token_expired(expires_at, self.refresh_buffer)
+            return oauth.is_token_expired(config.oauth_expires_at, self.refresh_buffer)
 
         except Exception:
             return False
