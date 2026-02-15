@@ -14,6 +14,7 @@ from .settings import (
     import_from_iflow_cli,
 )
 from .server import ServerManager, ServerState
+from .tray import TrayManager, is_tray_available
 import webbrowser
 import asyncio
 
@@ -32,6 +33,10 @@ class IFlow2ApiApp:
             on_state_change=self._on_server_state_change_threadsafe
         )
 
+        # 系统托盘
+        self.tray: Optional[TrayManager] = None
+        self._is_quitting = False
+
         # UI 组件
         self.status_icon: Optional[ft.Icon] = None
         self.status_text: Optional[ft.Text] = None
@@ -41,6 +46,7 @@ class IFlow2ApiApp:
         self.base_url_field: Optional[ft.TextField] = None
         self.auto_start_checkbox: Optional[ft.Checkbox] = None
         self.start_minimized_checkbox: Optional[ft.Checkbox] = None
+        self.minimize_to_tray_checkbox: Optional[ft.Checkbox] = None
         self.auto_run_checkbox: Optional[ft.Checkbox] = None
         self.start_btn: Optional[ft.Button] = None
         self.stop_btn: Optional[ft.Button] = None
@@ -48,6 +54,7 @@ class IFlow2ApiApp:
 
         self._setup_page()
         self._build_ui()
+        self._setup_tray()
 
         # 启动时自动运行服务
         if self.settings.auto_run_server:
@@ -73,9 +80,60 @@ class IFlow2ApiApp:
     def _on_window_event(self, e):
         """窗口事件处理"""
         if e.data == "close":
-            # 停止服务并退出
-            self.server.stop()
-            self.page.window.destroy()
+            # 检查是否最小化到托盘
+            if self.settings.minimize_to_tray and is_tray_available():
+                # 最小化到托盘而非退出
+                self.page.window.minimized = True
+                self.page.window.prevent_close = True
+            else:
+                # 停止服务并退出
+                self._quit_app()
+
+    def _setup_tray(self):
+        """设置系统托盘"""
+        if not is_tray_available():
+            return
+
+        self.tray = TrayManager(
+            on_show_window=self._show_window_from_tray,
+            on_start_server=self._start_server_from_tray,
+            on_stop_server=self._stop_server_from_tray,
+            on_quit=self._quit_app_from_tray,
+        )
+        self.tray.start()
+
+    def _show_window_from_tray(self):
+        """从托盘显示主窗口"""
+        try:
+            self.page.window.minimized = False
+            self.page.window.focused = True
+            self.page.update()
+        except Exception:
+            pass
+
+    def _start_server_from_tray(self):
+        """从托盘启动服务"""
+        self._start_server(None)
+
+    def _stop_server_from_tray(self):
+        """从托盘停止服务"""
+        self._stop_server(None)
+
+    def _quit_app_from_tray(self):
+        """从托盘退出应用"""
+        self._is_quitting = True
+        self._quit_app()
+
+    def _quit_app(self):
+        """退出应用"""
+        self.server.stop()
+        if self.tray:
+            self.tray.stop()
+        try:
+            self.page.window.prevent_close = False
+            self.page.window.close()
+        except Exception:
+            pass
 
     def _build_ui(self):
         """构建 UI"""
@@ -171,6 +229,11 @@ class IFlow2ApiApp:
             label="启动时最小化",
             value=self.settings.start_minimized,
         )
+        self.minimize_to_tray_checkbox = ft.Checkbox(
+            label="关闭时最小化到托盘",
+            value=self.settings.minimize_to_tray,
+            disabled=not is_tray_available(),
+        )
         self.auto_run_checkbox = ft.Checkbox(
             label="启动时自动运行服务",
             value=self.settings.auto_run_server,
@@ -182,6 +245,7 @@ class IFlow2ApiApp:
                     ft.Text("应用设置", weight=ft.FontWeight.BOLD),
                     self.auto_start_checkbox,
                     self.start_minimized_checkbox,
+                    self.minimize_to_tray_checkbox,
                     self.auto_run_checkbox,
                 ]
             ),
@@ -321,6 +385,17 @@ class IFlow2ApiApp:
         self.start_btn.disabled = is_running or is_busy
         self.stop_btn.disabled = not is_running or is_busy
 
+        # 更新托盘状态
+        if self.tray:
+            if state == ServerState.STARTING:
+                self.tray.update_status(False, "starting")
+            elif state == ServerState.RUNNING:
+                self.tray.update_status(True, "normal")
+            elif state == ServerState.ERROR:
+                self.tray.update_status(False, "error")
+            else:
+                self.tray.update_status(False, "normal")
+
         self._add_log(text)
         self.page.update()
 
@@ -354,6 +429,7 @@ class IFlow2ApiApp:
         self.settings.api_key = self.api_key_field.value or ""
         self.settings.base_url = self.base_url_field.value or "https://apis.iflow.cn/v1"
         self.settings.start_minimized = self.start_minimized_checkbox.value
+        self.settings.minimize_to_tray = self.minimize_to_tray_checkbox.value
         self.settings.auto_run_server = self.auto_run_checkbox.value
 
     def _import_from_cli(self, e):

@@ -40,13 +40,13 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install flet
+          pip install flet pystray Pillow
 
       - name: Install Linux dependencies
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libmpv-dev ninja-build clang
+          sudo apt-get install -y libgtk-3-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libmpv-dev ninja-build clang python3-gi gir1.2-appindicator3-0.1
 
       - name: Build with Flet
         env:

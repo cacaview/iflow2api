@@ -1,13 +1,15 @@
 """应用配置管理 - 使用 ~/.iflow/settings.json 统一管理配置"""
 
 import json
-import sys
 from pathlib import Path
 from typing import Optional
 
 from pydantic import BaseModel
 
 from .config import load_iflow_config, save_iflow_config, IFlowConfig
+from .autostart import set_auto_start as _set_auto_start
+from .autostart import get_auto_start as _get_auto_start
+from .autostart import is_auto_start_supported, get_platform_name
 
 
 class AppSettings(BaseModel):
@@ -30,6 +32,7 @@ class AppSettings(BaseModel):
     # 应用设置 (保存到 ~/.iflow2api/config.json)
     auto_start: bool = False  # 开机自启动
     start_minimized: bool = False  # 启动时最小化
+    minimize_to_tray: bool = True  # 关闭时最小化到托盘
     auto_run_server: bool = False  # 启动时自动运行服务
 
 
@@ -75,6 +78,8 @@ def load_settings() -> AppSettings:
                     settings.auto_start = data["auto_start"]
                 if "start_minimized" in data:
                     settings.start_minimized = data["start_minimized"]
+                if "minimize_to_tray" in data:
+                    settings.minimize_to_tray = data["minimize_to_tray"]
                 if "auto_run_server" in data:
                     settings.auto_run_server = data["auto_run_server"]
         except Exception:
@@ -99,6 +104,7 @@ def save_settings(settings: AppSettings) -> None:
         "port": settings.port,
         "auto_start": settings.auto_start,
         "start_minimized": settings.start_minimized,
+        "minimize_to_tray": settings.minimize_to_tray,
         "auto_run_server": settings.auto_run_server,
     }
 
@@ -122,74 +128,17 @@ def save_settings(settings: AppSettings) -> None:
         save_iflow_config(existing_config)
 
 
-def get_exe_path() -> str:
-    """获取当前可执行文件路径"""
-    if getattr(sys, "frozen", False):
-        # PyInstaller 打包后
-        return sys.executable
-    else:
-        # 开发模式
-        return f'"{sys.executable}" -m iflow2api.gui'
-
-
 def set_auto_start(enabled: bool) -> bool:
-    """设置开机自启动 (Windows)"""
-    if sys.platform != "win32":
-        return False
+    """设置开机自启动（跨平台）
 
-    import winreg
-
-    app_name = "iflow2api"
-    exe_path = get_exe_path()
-
-    try:
-        key = winreg.OpenKey(
-            winreg.HKEY_CURRENT_USER,
-            r"Software\Microsoft\Windows\CurrentVersion\Run",
-            0,
-            winreg.KEY_SET_VALUE | winreg.KEY_QUERY_VALUE,
-        )
-
-        if enabled:
-            winreg.SetValueEx(key, app_name, 0, winreg.REG_SZ, exe_path)
-        else:
-            try:
-                winreg.DeleteValue(key, app_name)
-            except FileNotFoundError:
-                pass
-
-        winreg.CloseKey(key)
-        return True
-    except Exception:
-        return False
+    支持 Windows、macOS、Linux
+    """
+    return _set_auto_start(enabled)
 
 
 def get_auto_start() -> bool:
-    """检查是否已设置开机自启动"""
-    if sys.platform != "win32":
-        return False
-
-    import winreg
-
-    app_name = "iflow2api"
-
-    try:
-        key = winreg.OpenKey(
-            winreg.HKEY_CURRENT_USER,
-            r"Software\Microsoft\Windows\CurrentVersion\Run",
-            0,
-            winreg.KEY_QUERY_VALUE,
-        )
-
-        try:
-            winreg.QueryValueEx(key, app_name)
-            winreg.CloseKey(key)
-            return True
-        except FileNotFoundError:
-            winreg.CloseKey(key)
-            return False
-    except Exception:
-        return False
+    """检查是否已设置开机自启动（跨平台）"""
+    return _get_auto_start()
 
 
 def import_from_iflow_cli() -> Optional[IFlowConfig]:
