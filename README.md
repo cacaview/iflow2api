@@ -12,18 +12,19 @@
 - 通过 `User-Agent: iFlow-Cli` 解锁 CLI 专属高级模型
 - 内置 GUI OAuth 登录界面，无需安装 iFlow CLI
 - 支持 OAuth token 自动刷新
+- 兼容 Anthropic Messages API，可直接对接 Claude Code
 
 ## 支持的模型
 
-| 模型 ID | 名称 | 说明 |
-|---------|------|------|
-| `glm-4.7` | GLM-4.7 | 智谱 GLM-4.7 (推荐) |
-| `iFlow-ROME-30BA3B` | iFlow-ROME-30BA3B | iFlow ROME 30B (快速) |
-| `deepseek-v3.2-chat` | DeepSeek-V3.2 | DeepSeek V3.2 对话模型 |
-| `qwen3-coder-plus` | Qwen3-Coder-Plus | 通义千问 Qwen3 Coder Plus |
-| `kimi-k2-thinking` | Kimi-K2-Thinking | Moonshot Kimi K2 思考模型 |
-| `minimax-m2.1` | MiniMax-M2.1 | MiniMax M2.1 |
-| `kimi-k2-0905` | Kimi-K2-0905 | Moonshot Kimi K2 0905 |
+| 模型 ID                | 名称              | 说明                      |
+| ---------------------- | ----------------- | ------------------------- |
+| `glm-5`              | GLM-5             | 智谱 GLM-5(推荐)          |
+| `iFlow-ROME-30BA3B`  | iFlow-ROME-30BA3B | iFlow ROME 30B (快速)     |
+| `deepseek-v3.2-chat` | DeepSeek-V3.2     | DeepSeek V3.2 对话模型    |
+| `qwen3-coder-plus`   | Qwen3-Coder-Plus  | 通义千问 Qwen3 Coder Plus |
+| `kimi-k2-thinking`   | Kimi-K2-Thinking  | Moonshot Kimi K2 思考模型 |
+| `minimax-m2.5`       | MiniMax-M2.5      | MiniMax M2.5              |
+| `kimi-k2.5`          | Kimi-K2.5         | Moonshot Kimi K2.5        |
 
 > 模型列表来源于 iflow-cli 源码，可能随 iFlow 更新而变化。
 
@@ -57,6 +58,7 @@ iflow
 ### 配置文件
 
 登录后配置文件会自动生成：
+
 - Windows: `C:\Users\<用户名>\.iflow\settings.json`
 - Linux/Mac: `~/.iflow/settings.json`
 
@@ -92,13 +94,14 @@ python -c "import uvicorn; from iflow2api.app import app; uvicorn.run(app, host=
 
 ## API 端点
 
-| 端点 | 方法 | 说明 |
-|------|------|------|
-| `/health` | GET | 健康检查 |
-| `/v1/models` | GET | 获取可用模型列表 |
-| `/v1/chat/completions` | POST | Chat Completions API |
-| `/models` | GET | 兼容端点 (不带 /v1 前缀) |
-| `/chat/completions` | POST | 兼容端点 (不带 /v1 前缀) |
+| 端点                     | 方法 | 说明                                            |
+| ------------------------ | ---- | ----------------------------------------------- |
+| `/health`              | GET  | 健康检查                                        |
+| `/v1/models`           | GET  | 获取可用模型列表                                |
+| `/v1/chat/completions` | POST | Chat Completions API (OpenAI 格式)              |
+| `/v1/messages`         | POST | Messages API (Anthropic 格式，Claude Code 兼容) |
+| `/models`              | GET  | 兼容端点 (不带 /v1 前缀)                        |
+| `/chat/completions`    | POST | 兼容端点 (不带 /v1 前缀)                        |
 
 ## 客户端配置示例
 
@@ -154,10 +157,51 @@ curl http://localhost:8000/v1/chat/completions \
   }'
 ```
 
+### Claude Code
+
+iflow2api 提供了 Anthropic 兼容的 `/v1/messages` 端点，可以直接对接 Claude Code。
+
+**1. 配置环境变量**
+
+在 `~/.zshrc`（或 `~/.bashrc`）中添加：
+
+```bash
+export ANTHROPIC_BASE_URL="http://localhost:8000"
+export ANTHROPIC_MODEL="glm-5" # kimi-k2.5, minimax-m2.5
+export ANTHROPIC_API_KEY="sk-placeholder"  # 任意非空值即可，认证信息从 iFlow 配置自动读取
+```
+
+生效配置：
+
+```bash
+source ~/.zshrc
+```
+
+**2. 启动 iflow2api 服务**
+
+```bash
+python -m iflow2api
+```
+
+**3. 使用 Claude Code**
+
+启动 Claude Code 后，使用 `/model` 命令切换到 iFlow 支持的模型：
+
+```
+/model glm-5
+```
+
+支持的模型 ID：`glm-5`、`deepseek-v3.2-chat`、`qwen3-coder-plus`、`kimi-k2-thinking`、`minimax-m2.5`、`kimi-k2.5`
+
+> **注意**：如果不切换模型，Claude Code 默认使用 `claude-sonnet-4-5-20250929` 等模型名，代理会自动将其映射到 `glm-5`。你也可以直接使用默认模型，无需手动切换。
+
+**工作原理**：Claude Code 向 `/v1/messages` 发送 Anthropic 格式请求 → iflow2api 将请求体转换为 OpenAI 格式 → 转发到 iFlow API → 将响应转换回 Anthropic SSE 格式返回给 Claude Code。
+
 ### 第三方客户端
 
 本服务兼容以下 OpenAI 兼容客户端:
 
+- **Claude Code**: 设置 `ANTHROPIC_BASE_URL=http://localhost:8000`（详见上方指南）
 - **ChatGPT-Next-Web**: 设置 API 地址为 `http://localhost:8000`
 - **LobeChat**: 添加 OpenAI 兼容提供商，Base URL 设为 `http://localhost:8000/v1`
 - **Open WebUI**: 添加 OpenAI 兼容连接
@@ -168,14 +212,14 @@ curl http://localhost:8000/v1/chat/completions \
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                      客户端请求                              │
-│  (OpenAI SDK / curl / ChatGPT-Next-Web / LobeChat)         │
+│  (Claude Code / OpenAI SDK / curl / ChatGPT-Next-Web)      │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                    iflow2api 本地代理                        │
 │  ┌─────────────────────────────────────────────────────┐   │
-│  │  /v1/chat/completions  │  /v1/models  │  /health   │   │
+│  │  /v1/chat/completions │ /v1/messages │ /v1/models │   │
 │  └─────────────────────────────────────────────────────┘   │
 │                              │                              │
 │  ┌─────────────────────────────────────────────────────┐   │
@@ -223,6 +267,7 @@ iflow2api/
 ### Q: 提示 "iFlow 未登录"
 
 确保已完成登录：
+
 - **GUI 方式**：点击界面上的 "OAuth 登录" 按钮
 - **CLI 方式**：运行 `iflow` 命令并完成登录
 

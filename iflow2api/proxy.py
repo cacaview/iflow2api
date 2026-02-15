@@ -113,8 +113,10 @@ class IFlowProxy:
         使用 iFlow-Cli User-Agent 可以解锁这些高级模型。
         """
         # iFlow CLI 支持的模型列表 (来源: iflow-cli SUPPORTED_MODELS)
+        # https://github.com/iflow-ai/iflow-cli/blob/main/src/models.ts
+        # 2026.2.15 更新
         models = [
-            {"id": "glm-4.7", "name": "GLM-4.7", "description": "智谱 GLM-4.7 (推荐)"},
+            {"id": "glm-5", "name": "GLM-5", "description": "智谱 GLM-5 (推荐)"},
             {
                 "id": "iFlow-ROME-30BA3B",
                 "name": "iFlow-ROME-30BA3B",
@@ -136,14 +138,14 @@ class IFlowProxy:
                 "description": "Moonshot Kimi K2 思考模型",
             },
             {
-                "id": "minimax-m2.1",
-                "name": "MiniMax-M2.1",
-                "description": "MiniMax M2.1",
+                "id": "minimax-m2.5",
+                "name": "MiniMax-M2.5",
+                "description": "MiniMax M2.5",
             },
             {
-                "id": "kimi-k2-0905",
-                "name": "Kimi-K2-0905",
-                "description": "Moonshot Kimi K2 0905",
+                "id": "kimi-k2.5",
+                "name": "Kimi-K2.5",
+                "description": "Moonshot Kimi K2.5",
             },
         ]
 

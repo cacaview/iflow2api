@@ -173,6 +173,119 @@ def extract_content_from_delta(delta: dict) -> str:
     return content or ""
 
 
+# ============ Anthropic → OpenAI 请求转换 ============
+
+# Claude Code 发送的模型名 → iFlow 实际模型名映射
+# 用户可通过 ANTHROPIC_MODEL 环境变量指定默认模型
+DEFAULT_IFLOW_MODEL = "glm-5"
+
+
+def get_mapped_model(anthropic_model: str) -> str:
+    """
+    将 Anthropic/Claude 模型名映射为 iFlow 模型名。
+    如果是已知的 iFlow 模型则原样返回，否则回退到默认模型。
+    """
+    # iFlow 已知模型 ID
+    known_iflow_models = {
+        "glm-5", "iFlow-ROME-30BA3B", "deepseek-v3.2-chat",
+        "qwen3-coder-plus", "kimi-k2-thinking", "minimax-m2.5", "kimi-k2.5",
+    }
+    if anthropic_model in known_iflow_models:
+        return anthropic_model
+    # Claude 系列模型名回退到默认
+    print(f"[iflow2api] 模型映射: {anthropic_model} → {DEFAULT_IFLOW_MODEL}")
+    return DEFAULT_IFLOW_MODEL
+
+
+def anthropic_to_openai_request(body: dict) -> dict:
+    """
+    将 Anthropic Messages API 请求体转换为 OpenAI Chat Completions 格式。
+    
+    Anthropic 格式:
+    {
+      "model": "claude-sonnet-4-5-20250929",
+      "max_tokens": 8096,
+      "system": "You are...",           # 或 [{"type":"text","text":"..."}]
+      "messages": [
+        {"role": "user", "content": "hello"}  # content 可以是 str 或 [{"type":"text","text":"..."}]
+      ],
+      "stream": true
+    }
+    
+    OpenAI 格式:
+    {
+      "model": "glm-5",
+      "max_tokens": 8096,
+      "messages": [
+        {"role": "system", "content": "You are..."},
+        {"role": "user", "content": "hello"}
+      ],
+      "stream": true
+    }
+    """
+    openai_body = {}
+    
+    # 1. 模型映射
+    openai_body["model"] = get_mapped_model(body.get("model", DEFAULT_IFLOW_MODEL))
+    
+    # 2. 构建 messages（先处理 system）
+    messages = []
+    system = body.get("system")
+    if system:
+        if isinstance(system, list):
+            # Anthropic 格式: [{"type": "text", "text": "..."}]
+            system_text = " ".join(
+                block.get("text", "") for block in system if block.get("type") == "text"
+            )
+        else:
+            system_text = str(system)
+        if system_text:
+            messages.append({"role": "system", "content": system_text})
+    
+    # 3. 转换 messages 中的 content
+    for msg in body.get("messages", []):
+        role = msg.get("role", "user")
+        content = msg.get("content", "")
+        
+        if isinstance(content, list):
+            # Anthropic 内容块格式 → 提取纯文本
+            text_parts = []
+            for block in content:
+                if isinstance(block, dict):
+                    if block.get("type") == "text":
+                        text_parts.append(block.get("text", ""))
+                    elif block.get("type") == "tool_result":
+                        # 工具结果，提取内容
+                        tool_content = block.get("content", "")
+                        if isinstance(tool_content, list):
+                            for tc in tool_content:
+                                if isinstance(tc, dict) and tc.get("type") == "text":
+                                    text_parts.append(tc.get("text", ""))
+                        elif isinstance(tool_content, str):
+                            text_parts.append(tool_content)
+                elif isinstance(block, str):
+                    text_parts.append(block)
+            content = "\n".join(text_parts)
+        
+        messages.append({"role": role, "content": content})
+    
+    openai_body["messages"] = messages
+    
+    # 4. 透传兼容参数
+    if "max_tokens" in body:
+        openai_body["max_tokens"] = body["max_tokens"]
+    if "temperature" in body:
+        openai_body["temperature"] = body["temperature"]
+    if "top_p" in body:
+        openai_body["top_p"] = body["top_p"]
+    if "stop_sequences" in body:
+        openai_body["stop"] = body["stop_sequences"]
+    if "stream" in body:
+        openai_body["stream"] = body["stream"]
+    
+    return openai_body
+
+
 # 全局代理实例
 _proxy: Optional[IFlowProxy] = None
 _config: Optional[IFlowConfig] = None
@@ -432,14 +545,18 @@ async def chat_completions_openai(request: Request):
 @app.post("/api/v1/messages")
 @app.post("/api/v1/messages/")
 async def messages_anthropic(request: Request):
-    """Messages API - Anthropic 格式（CCR 兼容）"""
+    """Messages API - Anthropic 格式（Claude Code 兼容）"""
     try:
         body_bytes = await request.body()
         body = json.loads(body_bytes.decode("utf-8"))
         stream = body.get("stream", False)
-        model = body.get("model", "unknown")
+        original_model = body.get("model", "unknown")
         
-        print(f"[iflow2api] Anthropic 格式请求: model={model}, stream={stream}")
+        # 将 Anthropic 请求体转换为 OpenAI 格式
+        openai_body = anthropic_to_openai_request(body)
+        mapped_model = openai_body["model"]
+        
+        print(f"[iflow2api] Anthropic 格式请求: model={original_model} → {mapped_model}, stream={stream}")
 
         proxy = get_proxy()
 
@@ -447,14 +564,14 @@ async def messages_anthropic(request: Request):
             # 流式响应 - 转换为 Anthropic SSE 格式
             async def generate_anthropic_stream():
                 # 发送 message_start
-                yield create_anthropic_stream_message_start(model).encode('utf-8')
+                yield create_anthropic_stream_message_start(mapped_model).encode('utf-8')
                 # 发送 content_block_start
                 yield create_anthropic_content_block_start().encode('utf-8')
                 
                 output_tokens = 0
                 buffer = ""
                 
-                async for chunk in await proxy.chat_completions(body, stream=True):
+                async for chunk in await proxy.chat_completions(openai_body, stream=True):
                     # OpenAI 流式数据是 bytes，需要解码
                     chunk_str = chunk.decode('utf-8') if isinstance(chunk, bytes) else chunk
                     buffer += chunk_str
@@ -501,8 +618,8 @@ async def messages_anthropic(request: Request):
             )
         else:
             # 非流式响应 - 转换为 Anthropic 格式
-            openai_result = await proxy.chat_completions(body, stream=False)
-            anthropic_result = openai_to_anthropic_response(openai_result, model)
+            openai_result = await proxy.chat_completions(openai_body, stream=False)
+            anthropic_result = openai_to_anthropic_response(openai_result, mapped_model)
             print(f"[iflow2api] Anthropic 格式响应: id={anthropic_result['id']}")
             return JSONResponse(content=anthropic_result)
 
