@@ -1,5 +1,7 @@
 # iflow2api
 
+[English Documentation](README_EN.md) | 简体中文
+
 将 iFlow CLI 的 AI 服务暴露为 OpenAI 兼容 API。
 
 ## 功能
