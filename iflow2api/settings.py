@@ -32,7 +32,8 @@ class AppSettings(BaseModel):
     # 应用设置 (保存到 ~/.iflow2api/config.json)
     auto_start: bool = False  # 开机自启动
     start_minimized: bool = False  # 启动时最小化
-    minimize_to_tray: bool = True  # 关闭时最小化到托盘
+    # 关闭按钮行为: "exit"=直接退出, "minimize_to_tray"=最小化到托盘, "minimize_to_taskbar"=最小化到任务栏
+    close_action: str = "minimize_to_tray"
     auto_run_server: bool = False  # 启动时自动运行服务
 
     # 主题设置
@@ -92,8 +93,12 @@ def load_settings() -> AppSettings:
                     settings.auto_start = data["auto_start"]
                 if "start_minimized" in data:
                     settings.start_minimized = data["start_minimized"]
-                if "minimize_to_tray" in data:
-                    settings.minimize_to_tray = data["minimize_to_tray"]
+                if "close_action" in data:
+                    settings.close_action = data["close_action"]
+                elif "minimize_to_tray" in data:
+                    # 兼容旧配置：minimize_to_tray=True -> close_action="minimize_to_tray"
+                    # minimize_to_tray=False -> close_action="exit"
+                    settings.close_action = "minimize_to_tray" if data["minimize_to_tray"] else "exit"
                 if "auto_run_server" in data:
                     settings.auto_run_server = data["auto_run_server"]
                 if "theme_mode" in data:
@@ -177,7 +182,7 @@ def save_settings(settings: AppSettings) -> None:
         # 应用设置
         "auto_start": settings.auto_start,
         "start_minimized": settings.start_minimized,
-        "minimize_to_tray": settings.minimize_to_tray,
+        "close_action": settings.close_action,
         "auto_run_server": settings.auto_run_server,
         "theme_mode": settings.theme_mode,
         # 速率限制设置

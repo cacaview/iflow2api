@@ -33,6 +33,7 @@ class IFlow2ApiApp:
     def __init__(self, page: ft.Page):
         self.page = page
         self.settings = load_settings()
+        print(f"[DEBUG] 初始化应用, close_action={self.settings.close_action}")
 
         # 设置语言
         set_language(self.settings.language)
@@ -90,6 +91,13 @@ class IFlow2ApiApp:
 
         # 窗口关闭事件
         self.page.window.on_event = self._on_window_event
+        
+        # 如果关闭行为不是直接退出，需要阻止窗口关闭
+        # 这样点击关闭按钮时才能执行最小化操作
+        prevent_close_needed = self.settings.close_action != "exit"
+        print(f"[DEBUG] prevent_close 设置为: {prevent_close_needed} (close_action={self.settings.close_action})")
+        if prevent_close_needed:
+            self.page.window.prevent_close = True
 
     def _apply_theme(self):
         """应用主题设置"""
@@ -102,16 +110,25 @@ class IFlow2ApiApp:
         else:
             self.page.theme_mode = ft.ThemeMode.LIGHT
 
-    def _on_window_event(self, e):
+    def _on_window_event(self, e: ft.WindowEvent):
         """窗口事件处理"""
-        if e.data == "close":
-            # 检查是否最小化到托盘
-            if self.settings.minimize_to_tray and is_tray_available():
-                # 最小化到托盘而非退出
+        if e.type == ft.WindowEventType.CLOSE:
+            close_action = self.settings.close_action
+            print(f"[DEBUG] 窗口关闭事件, close_action={close_action}")
+            
+            if close_action == "minimize_to_tray" and is_tray_available():
+                # 最小化到系统托盘 - 隐藏窗口
+                print(f"[DEBUG] 最小化到系统托盘")
+                self.page.window.visible = False
+                self.page.update()
+            elif close_action == "minimize_to_taskbar":
+                # 最小化到任务栏
+                print(f"[DEBUG] 最小化到任务栏")
                 self.page.window.minimized = True
-                self.page.window.prevent_close = True
+                self.page.update()
             else:
-                # 停止服务并退出
+                # 直接退出
+                print(f"[DEBUG] 直接退出")
                 self._quit_app()
 
     def _setup_tray(self):
@@ -128,8 +145,16 @@ class IFlow2ApiApp:
         self.tray.start()
 
     def _show_window_from_tray(self):
-        """从托盘显示主窗口"""
+        """从托盘显示主窗口（在 pystray 后台线程中调用，需通过 pubsub 中转到主线程）"""
         try:
+            self.page.pubsub.send_all({"type": "tray_show_window"})
+        except Exception:
+            pass
+
+    def _show_window_from_tray_main(self):
+        """从托盘显示主窗口 - 主线程执行"""
+        try:
+            self.page.window.visible = True
             self.page.window.minimized = False
             self.page.window.focused = True
             self.page.update()
@@ -137,17 +162,25 @@ class IFlow2ApiApp:
             pass
 
     def _start_server_from_tray(self):
-        """从托盘启动服务"""
-        self._start_server(None)
+        """从托盘启动服务（在 pystray 后台线程中调用，需通过 pubsub 中转到主线程）"""
+        try:
+            self.page.pubsub.send_all({"type": "tray_start_server"})
+        except Exception:
+            pass
 
     def _stop_server_from_tray(self):
-        """从托盘停止服务"""
-        self._stop_server(None)
+        """从托盘停止服务（在 pystray 后台线程中调用，需通过 pubsub 中转到主线程）"""
+        try:
+            self.page.pubsub.send_all({"type": "tray_stop_server"})
+        except Exception:
+            pass
 
     def _quit_app_from_tray(self):
-        """从托盘退出应用"""
-        self._is_quitting = True
-        self._quit_app()
+        """从托盘退出应用（在 pystray 后台线程中调用，需通过 pubsub 中转到主线程）"""
+        try:
+            self.page.pubsub.send_all({"type": "tray_quit"})
+        except Exception:
+            pass
 
     def _quit_app(self):
         """退出应用"""
@@ -156,7 +189,7 @@ class IFlow2ApiApp:
             self.tray.stop()
         try:
             self.page.window.prevent_close = False
-            self.page.window.close()
+            self.page.window.destroy()
         except Exception:
             pass
 
@@ -395,6 +428,23 @@ class IFlow2ApiApp:
             error = message.get("error", "Unknown error")
             self._show_snack_bar(t("update.error", error=error), color=ft.Colors.RED)
             self._add_log(t("update.error", error=error))
+        
+        elif msg_type == "tray_show_window":
+            # 从托盘显示主窗口
+            self._show_window_from_tray_main()
+        
+        elif msg_type == "tray_start_server":
+            # 从托盘启动服务
+            self._start_server(None)
+        
+        elif msg_type == "tray_stop_server":
+            # 从托盘停止服务
+            self._stop_server(None)
+        
+        elif msg_type == "tray_quit":
+            # 从托盘退出应用
+            self._is_quitting = True
+            self._quit_app()
 
     def _on_server_state_change_threadsafe(self, state: ServerState, message: str):
         """服务状态变化回调 - 线程安全版本，从后台线程调用"""
@@ -475,15 +525,37 @@ class IFlow2ApiApp:
             label=t("settings.start_minimized"),
             value=self.settings.start_minimized,
         )
-        minimize_to_tray_checkbox = ft.Checkbox(
-            label=t("settings.minimize_to_tray"),
-            value=self.settings.minimize_to_tray,
-            disabled=not is_tray_available(),
-        )
         auto_run_checkbox = ft.Checkbox(
             label=t("settings.auto_run_server"),
             value=self.settings.auto_run_server,
         )
+        
+        # === 关闭按钮行为 ===
+        close_action_dropdown = ft.Dropdown(
+            label=t("settings.close_action"),
+            options=[
+                ft.dropdown.Option("exit", t("settings.close_action_exit")),
+                ft.dropdown.Option("minimize_to_tray", t("settings.close_action_minimize_to_tray")),
+                ft.dropdown.Option("minimize_to_taskbar", t("settings.close_action_minimize_to_taskbar")),
+            ],
+            value=self.settings.close_action,
+            width=300,
+            disabled=not is_tray_available() and self.settings.close_action == "minimize_to_tray",
+        )
+        
+        # 关闭行为说明文本
+        close_action_hint = ft.Text(
+            t(f"settings.close_action_hint_{self.settings.close_action}"),
+            size=11,
+            color=ft.Colors.OUTLINE,
+        )
+        
+        def on_close_action_change(e):
+            """关闭行为选择变化时更新说明文本"""
+            close_action_hint.value = t(f"settings.close_action_hint_{close_action_dropdown.value}")
+            close_action_hint.update()
+        
+        close_action_dropdown.on_change = on_close_action_change
         
         # === 内容处理设置 ===
         preserve_reasoning_checkbox = ft.Checkbox(
@@ -553,10 +625,16 @@ class IFlow2ApiApp:
             
             # 更新其他设置
             self.settings.start_minimized = start_minimized_checkbox.value
-            self.settings.minimize_to_tray = minimize_to_tray_checkbox.value
+            self.settings.close_action = close_action_dropdown.value or "minimize_to_tray"
             self.settings.auto_run_server = auto_run_checkbox.value
             self.settings.preserve_reasoning_content = preserve_reasoning_checkbox.value
             self.settings.theme_mode = theme_dropdown.value or "system"
+            
+            # 更新窗口关闭行为
+            if self.settings.close_action == "exit":
+                self.page.window.prevent_close = False
+            else:
+                self.page.window.prevent_close = True
             
             # 更新语言设置
             new_language = language_dropdown.value or "zh"
@@ -612,8 +690,14 @@ class IFlow2ApiApp:
                 ft.Text(t("settings.section.startup"), weight=ft.FontWeight.BOLD, size=14),
                 auto_start_checkbox,
                 start_minimized_checkbox,
-                minimize_to_tray_checkbox,
                 auto_run_checkbox,
+                
+                ft.Divider(),
+                
+                # 窗口行为设置
+                ft.Text(t("settings.section.window"), weight=ft.FontWeight.BOLD, size=14),
+                close_action_dropdown,
+                close_action_hint,
                 
                 ft.Divider(),
                 
