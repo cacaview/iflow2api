@@ -148,7 +148,7 @@ docker-compose up -d
 
 # 或直接运行
 docker build -t iflow2api .
-docker run -d -p 28000:28000 -v ~/.iflow:/root/.iflow iflow2api
+docker run -d -p 28000:28000 -v ~/.iflow:/home/appuser/.iflow:ro iflow2api
 ```
 
 详细部署文档请参考 [Docker 部署指南](docs/DOCKER.md)。

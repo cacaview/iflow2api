@@ -148,7 +148,7 @@ docker-compose up -d
 
 # Or build and run directly
 docker build -t iflow2api .
-docker run -d -p 28000:28000 -v ~/.iflow:/root/.iflow iflow2api
+docker run -d -p 28000:28000 -v ~/.iflow:/home/appuser/.iflow:ro iflow2api
 ```
 
 For detailed deployment instructions, see [Docker Deployment Guide](docs/DOCKER.md).

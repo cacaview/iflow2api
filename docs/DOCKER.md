@@ -119,14 +119,14 @@ docker pull --platform linux/amd64 iflow2api:latest
 
 ```bash
 # 拉取镜像
-docker pull iflow2api/iflow2api:latest
+docker pull cacaview/iflow2api:latest
 
 # 使用 Docker Hub 镜像运行
 docker run -d \
   --name iflow2api \
   -p 28000:28000 \
   -v ~/.iflow:/home/appuser/.iflow:ro \
-  iflow2api/iflow2api:latest
+  cacaview/iflow2api:latest
 ```
 
 ## 生产环境建议
