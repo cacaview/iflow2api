@@ -6,6 +6,7 @@ from typing import Optional
 import threading
 import webbrowser
 import asyncio
+import sys
 
 from .settings import (
     AppSettings,
@@ -89,15 +90,16 @@ class IFlow2ApiApp:
         # 设置主题
         self._apply_theme()
 
+        # 始终拦截窗口关闭事件，在事件处理程序中根据 close_action 决定行为
+        # 这确保了关闭按钮不会直接退出应用
+        self.page.window.prevent_close = True
+        print(f"[DEBUG] prevent_close 已设置为 True (close_action={self.settings.close_action})")
+
         # 窗口关闭事件
         self.page.window.on_event = self._on_window_event
-        
-        # 如果关闭行为不是直接退出，需要阻止窗口关闭
-        # 这样点击关闭按钮时才能执行最小化操作
-        prevent_close_needed = self.settings.close_action != "exit"
-        print(f"[DEBUG] prevent_close 设置为: {prevent_close_needed} (close_action={self.settings.close_action})")
-        if prevent_close_needed:
-            self.page.window.prevent_close = True
+
+        # 立即更新以确保 prevent_close 同步到 Flutter 客户端
+        self.page.update()
 
     def _apply_theme(self):
         """应用主题设置"""
@@ -114,13 +116,22 @@ class IFlow2ApiApp:
         """窗口事件处理"""
         if e.type == ft.WindowEventType.CLOSE:
             close_action = self.settings.close_action
-            print(f"[DEBUG] 窗口关闭事件, close_action={close_action}")
+            is_macos = sys.platform == "darwin"
+            print(f"[DEBUG] 窗口关闭事件, close_action={close_action}, platform={sys.platform}")
             
-            if close_action == "minimize_to_tray" and is_tray_available():
-                # 最小化到系统托盘 - 隐藏窗口
-                print(f"[DEBUG] 最小化到系统托盘")
-                self.page.window.visible = False
-                self.page.update()
+            if close_action == "minimize_to_tray":
+                if is_tray_available() and not is_macos:
+                    # Windows/Linux: 最小化到系统托盘 - 隐藏窗口
+                    print(f"[DEBUG] 最小化到系统托盘 (visible=False)")
+                    self.page.window.visible = False
+                    self.page.update()
+                else:
+                    # macOS 或 托盘不可用: 回退到最小化到任务栏/Dock
+                    # macOS 上 pystray 需要主线程运行，与 Flet 冲突，因此无法显示托盘图标
+                    # 为防止窗口丢失，强制使用最小化
+                    print(f"[DEBUG] {'macOS' if is_macos else '托盘不可用'}，回退到最小化到任务栏/Dock")
+                    self.page.window.minimized = True
+                    self.page.update()
             elif close_action == "minimize_to_taskbar":
                 # 最小化到任务栏
                 print(f"[DEBUG] 最小化到任务栏")
@@ -184,12 +195,25 @@ class IFlow2ApiApp:
 
     def _quit_app(self):
         """退出应用"""
+        self._is_quitting = True
         self.server.stop()
         if self.tray:
             self.tray.stop()
         try:
             self.page.window.prevent_close = False
-            self.page.window.destroy()
+            self.page.update()
+            # destroy() 在 Flet 0.80 中是异步方法，使用 asyncio 调度
+            import asyncio
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    loop.create_task(self.page.window.destroy())
+                else:
+                    loop.run_until_complete(self.page.window.destroy())
+            except Exception:
+                # 如果 asyncio 调度失败，尝试直接调用
+                # Flet 内部可能会自动处理 async 转同步
+                self.page.window.destroy()
         except Exception:
             pass
 
@@ -630,11 +654,9 @@ class IFlow2ApiApp:
             self.settings.preserve_reasoning_content = preserve_reasoning_checkbox.value
             self.settings.theme_mode = theme_dropdown.value or "system"
             
-            # 更新窗口关闭行为
-            if self.settings.close_action == "exit":
-                self.page.window.prevent_close = False
-            else:
-                self.page.window.prevent_close = True
+            # 始终保持 prevent_close = True，在事件处理中决定行为
+            # 这样可以避免 macOS 上 prevent_close 不生效的问题
+            self.page.window.prevent_close = True
             
             # 更新语言设置
             new_language = language_dropdown.value or "zh"

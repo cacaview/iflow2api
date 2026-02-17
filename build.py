@@ -23,10 +23,11 @@ def build():
 
     project_dir = Path(__file__).parent
     src_dir = project_dir / "iflow2api"
+    gui_script = src_dir / "gui.py"
     build_dir = project_dir / "build"
 
-    if not src_dir.exists():
-        print(f"[错误] 源目录不存在: {src_dir}")
+    if not gui_script.exists():
+        print(f"[错误] GUI 脚本不存在: {gui_script}")
         sys.exit(1)
 
     if build_dir.exists():
@@ -41,8 +42,8 @@ def build():
         cmd = [
             "flet",
             "pack",
-            str(src_dir),
-            "--product",
+            str(gui_script),
+            "--product-name",
             "iflow2api",
         ]
 
