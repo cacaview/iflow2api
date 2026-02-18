@@ -58,6 +58,10 @@ class AppSettings(BaseModel):
     check_update_on_startup: bool = True  # 启动时检查更新
     skip_version: str = ""  # 跳过的版本号
 
+    # 自定义 API 鉴权设置
+    custom_api_key: str = ""  # 自定义 API 密钥，留空则不验证
+    custom_auth_header: str = "Authorization"  # 自定义授权标头名称
+
 
 def get_config_dir() -> Path:
     """获取应用配置目录"""
@@ -132,6 +136,11 @@ def load_settings() -> AppSettings:
                     settings.check_update_on_startup = data["check_update_on_startup"]
                 if "skip_version" in data:
                     settings.skip_version = data["skip_version"]
+                # 自定义 API 鉴权设置
+                if "custom_api_key" in data:
+                    settings.custom_api_key = data["custom_api_key"]
+                if "custom_auth_header" in data:
+                    settings.custom_auth_header = data["custom_auth_header"]
         except Exception:
             pass
 
@@ -197,6 +206,9 @@ def save_settings(settings: AppSettings) -> None:
         # 更新检查设置
         "check_update_on_startup": settings.check_update_on_startup,
         "skip_version": settings.skip_version,
+        # 自定义 API 鉴权设置
+        "custom_api_key": settings.custom_api_key,
+        "custom_auth_header": settings.custom_auth_header,
     }
 
     config_path = get_config_path()

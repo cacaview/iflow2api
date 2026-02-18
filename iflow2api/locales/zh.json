@@ -49,12 +49,17 @@
       "content": "内容处理",
       "appearance": "外观设置",
       "rate_limit": "速率限制",
-      "update": "更新检查"
+      "update": "更新检查",
+      "security": "安全认证"
     },
     "rate_limit_enabled": "启用速率限制",
     "requests_per_minute": "每分钟请求数",
     "requests_per_hour": "每小时请求数",
-    "requests_per_day": "每日请求数"
+    "requests_per_day": "每日请求数",
+    "custom_api_key": "API 密钥",
+    "custom_api_key_hint": "留空则不验证，设置后客户端需携带此密钥",
+    "custom_auth_header": "授权标头名称",
+    "custom_auth_header_hint": "如：Authorization, cs-sk-key 等"
   },
   "button": {
     "start": "启动服务",

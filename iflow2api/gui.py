@@ -663,6 +663,23 @@ class IFlow2ApiApp:
             keyboard_type=ft.KeyboardType.NUMBER,
             width=150,
         )
+        
+        # === 自定义 API 鉴权设置 ===
+        custom_api_key_field = ft.TextField(
+            label=t("settings.custom_api_key"),
+            value=self.settings.custom_api_key,
+            password=True,
+            can_reveal_password=True,
+            hint_text=t("settings.custom_api_key_hint"),
+            width=300,
+        )
+        
+        custom_auth_header_field = ft.TextField(
+            label=t("settings.custom_auth_header"),
+            value=self.settings.custom_auth_header,
+            hint_text=t("settings.custom_auth_header_hint"),
+            width=300,
+        )
 
         def on_save(e):
             """保存设置"""
@@ -705,6 +722,10 @@ class IFlow2ApiApp:
             
             # 更新全局速率限制器
             update_rate_limiter_settings(per_minute, per_hour, per_day)
+            
+            # 更新自定义 API 鉴权设置
+            self.settings.custom_api_key = custom_api_key_field.value or ""
+            self.settings.custom_auth_header = custom_auth_header_field.value or "Authorization"
             
             # 应用主题
             self._apply_theme()
@@ -788,6 +809,13 @@ class IFlow2ApiApp:
                     ],
                     alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                 ),
+                
+                ft.Divider(),
+                
+                # 自定义 API 鉴权设置
+                ft.Text(t("settings.section.security"), weight=ft.FontWeight.BOLD, size=14),
+                custom_api_key_field,
+                custom_auth_header_field,
             ],
             spacing=10,
         )

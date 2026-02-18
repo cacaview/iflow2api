@@ -49,12 +49,17 @@
       "content": "Content Processing",
       "appearance": "Appearance",
       "rate_limit": "Rate Limiting",
-      "update": "Update Check"
+      "update": "Update Check",
+      "security": "Security Authentication"
     },
     "rate_limit_enabled": "Enable rate limiting",
     "requests_per_minute": "Requests per minute",
     "requests_per_hour": "Requests per hour",
-    "requests_per_day": "Requests per day"
+    "requests_per_day": "Requests per day",
+    "custom_api_key": "API Key",
+    "custom_api_key_hint": "Leave empty to disable, clients must provide this key when set",
+    "custom_auth_header": "Authorization Header Name",
+    "custom_auth_header_hint": "e.g., Authorization, cs-sk-key, etc."
   },
   "button": {
     "start": "Start Server",

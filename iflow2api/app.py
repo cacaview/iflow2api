@@ -585,6 +585,67 @@ app.add_middleware(
 app.middleware("http")(create_rate_limit_middleware())
 
 
+# ============ 自定义 API 鉴权中间件 ============
+
+@app.middleware("http")
+async def custom_auth_middleware(request: Request, call_next):
+    """自定义 API 鉴权中间件
+    
+    如果配置了 custom_api_key，则验证请求头中的授权信息
+    支持 "Bearer {key}" 和 "{key}" 两种格式
+    """
+    # 跳过健康检查、文档等路由
+    skip_paths = ["/health", "/docs", "/redoc", "/openapi.json", "/admin"]
+    if any(request.url.path.startswith(path) for path in skip_paths):
+        return await call_next(request)
+    
+    # 加载设置
+    from .settings import load_settings
+    settings = load_settings()
+    
+    # 如果未设置 custom_api_key，则跳过验证
+    if not settings.custom_api_key:
+        return await call_next(request)
+    
+    # 获取授权标头
+    auth_header_name = settings.custom_auth_header or "Authorization"
+    auth_value = request.headers.get(auth_header_name)
+    
+    # 验证授权信息
+    if not auth_value:
+        return JSONResponse(
+            status_code=401,
+            content={
+                "error": {
+                    "message": f"Missing {auth_header_name} header",
+                    "type": "authentication_error",
+                    "code": "missing_api_key",
+                }
+            },
+        )
+    
+    # 提取实际的 key（支持 "Bearer {key}" 和 "{key}" 格式）
+    actual_key = auth_value
+    if auth_value.startswith("Bearer "):
+        actual_key = auth_value[7:]  # 移除 "Bearer " 前缀
+    
+    # 验证 key
+    if actual_key != settings.custom_api_key:
+        return JSONResponse(
+            status_code=401,
+            content={
+                "error": {
+                    "message": "Invalid API key",
+                    "type": "authentication_error",
+                    "code": "invalid_api_key",
+                }
+            },
+        )
+    
+    # 验证通过，继续处理请求
+    return await call_next(request)
+
+
 # ============ 管理界面 ============
 
 # 挂载静态文件目录
