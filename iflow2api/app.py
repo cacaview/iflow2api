@@ -41,7 +41,7 @@ def openai_to_anthropic_response(openai_response: dict, model: str) -> dict:
     {
       "id": "chatcmpl-xxx",
       "object": "chat.completion",
-      "choices": [{"message": {"role": "assistant", "content": "..."}, "finish_reason": "stop"}],
+      "choices": [{"message": {"role": "assistant", "content": "...", "tool_calls": [...]}, "finish_reason": "stop"}],
       "usage": {"prompt_tokens": N, "completion_tokens": N, "total_tokens": N}
     }
     
@@ -50,35 +50,49 @@ def openai_to_anthropic_response(openai_response: dict, model: str) -> dict:
       "id": "msg_xxx",
       "type": "message",
       "role": "assistant",
-      "content": [{"type": "text", "text": "..."}],
+      "content": [{"type": "text", "text": "..."}, {"type": "tool_use", "id": "...", "name": "...", "input": {...}}],
       "model": "...",
-      "stop_reason": "end_turn",
+      "stop_reason": "end_turn" | "tool_use",
       "usage": {"input_tokens": N, "output_tokens": N}
     }
     """
-    # 提取内容
     choices = openai_response.get("choices", [])
-    content_text = ""
+    content_blocks = []
     finish_reason = "end_turn"
-    
-    # 验证响应结构
+
     if not choices:
         print(f"[iflow2api] 警告: OpenAI 响应中 choices 数组为空")
         print(f"[iflow2api] 完整响应: {json.dumps(openai_response, ensure_ascii=False)[:500]}")
-        # 使用回退内容避免空响应
-        content_text = "[错误: API 未返回有效内容]"
+        content_blocks = [{"type": "text", "text": "[错误: API 未返回有效内容]"}]
     else:
         choice = choices[0]
         message = choice.get("message", {})
-        # 优先使用 content，如果没有则使用 reasoning_content
         content_text = message.get("content") or message.get("reasoning_content", "")
-        
-        # 如果 content 是 None 或空字符串，记录警告
-        if not content_text:
-            print(f"[iflow2api] 警告: message.content 为空或 None")
+        tool_calls = message.get("tool_calls") or []
+
+        # 添加文本内容块
+        if content_text:
+            content_blocks.append({"type": "text", "text": content_text})
+
+        # 将 OpenAI tool_calls 转换为 Anthropic tool_use 内容块
+        for tc in tool_calls:
+            func = tc.get("function", {})
+            try:
+                tool_input = json.loads(func.get("arguments", "{}") or "{}")
+            except (json.JSONDecodeError, TypeError):
+                tool_input = {"_raw": func.get("arguments", "")}
+            content_blocks.append({
+                "type": "tool_use",
+                "id": tc.get("id") or f"toolu_{uuid.uuid4().hex[:24]}",
+                "name": func.get("name", ""),
+                "input": tool_input,
+            })
+
+        if not content_blocks:
+            print(f"[iflow2api] 警告: message.content 和 tool_calls 均为空")
             print(f"[iflow2api] message 内容: {json.dumps(message, ensure_ascii=False)}")
-            content_text = "[错误: API 返回空内容]"
-        
+            content_blocks = [{"type": "text", "text": "[错误: API 返回空内容]"}]
+
         # 转换 finish_reason
         openai_finish = choice.get("finish_reason", "stop")
         if openai_finish == "stop":
@@ -89,20 +103,15 @@ def openai_to_anthropic_response(openai_response: dict, model: str) -> dict:
             finish_reason = "tool_use"
         else:
             finish_reason = "end_turn"
-    
+
     # 提取 usage
     openai_usage = openai_response.get("usage", {})
-    
+
     return {
         "id": f"msg_{uuid.uuid4().hex[:24]}",
         "type": "message",
         "role": "assistant",
-        "content": [
-            {
-                "type": "text",
-                "text": content_text
-            }
-        ],
+        "content": content_blocks,
         "model": model,
         "stop_reason": finish_reason,
         "stop_sequence": None,
@@ -195,6 +204,26 @@ def create_anthropic_message_stop() -> str:
     """创建 Anthropic 流式响应的 message_stop 事件"""
     data = {"type": "message_stop"}
     return f"event: message_stop\ndata: {json.dumps(data)}\n\n"
+
+
+def create_anthropic_tool_use_block_start(index: int, tool_use_id: str, name: str) -> str:
+    """创建 Anthropic 流式响应的 tool_use content_block_start 事件"""
+    data = {
+        "type": "content_block_start",
+        "index": index,
+        "content_block": {"type": "tool_use", "id": tool_use_id, "name": name, "input": {}}
+    }
+    return f"event: content_block_start\ndata: {json.dumps(data)}\n\n"
+
+
+def create_anthropic_input_json_delta(partial_json: str, index: int) -> str:
+    """创建 Anthropic 流式响应的 input_json_delta content_block_delta 事件"""
+    data = {
+        "type": "content_block_delta",
+        "index": index,
+        "delta": {"type": "input_json_delta", "partial_json": partial_json}
+    }
+    return f"event: content_block_delta\ndata: {json.dumps(data)}\n\n"
 
 
 def parse_openai_sse_chunk(line: str) -> Optional[dict]:
@@ -350,74 +379,88 @@ def anthropic_to_openai_request(body: dict) -> dict:
         if system_text:
             messages.append({"role": "system", "content": system_text})
     
-    # 3. 转换 messages 中的 content（支持图像）
+    # 3. 转换 messages 中的 content（支持图像、工具调用）
     for msg in body.get("messages", []):
         role = msg.get("role", "user")
         content = msg.get("content", "")
-        
+
         if isinstance(content, list):
-            # 检查是否有图像
-            images = detect_image_content(content)
-            
-            if images:
-                # 有图像，使用 OpenAI 多模态格式
-                # 提取文本部分
-                text_parts = []
-                for block in content:
-                    if isinstance(block, dict):
-                        if block.get("type") == "text":
-                            text_parts.append(block.get("text", ""))
-                        elif block.get("type") == "tool_result":
-                            # 工具结果，提取内容
-                            tool_content = block.get("content", "")
-                            if isinstance(tool_content, list):
-                                for tc in tool_content:
-                                    if isinstance(tc, dict) and tc.get("type") == "text":
-                                        text_parts.append(tc.get("text", ""))
-                            elif isinstance(tool_content, str):
-                                text_parts.append(tool_content)
-                    elif isinstance(block, str):
-                        text_parts.append(block)
-                
-                # 构建多模态内容
-                multimodal_content = []
-                
-                # 添加文本
-                if text_parts:
-                    combined_text = "\n".join(text_parts)
-                    if combined_text.strip():
-                        multimodal_content.append({"type": "text", "text": combined_text})
-                
-                # 添加图像（OpenAI 格式）
-                from .vision import convert_to_openai_format
-                multimodal_content.extend(convert_to_openai_format(images))
-                
-                messages.append({"role": role, "content": multimodal_content})
-            else:
-                # 无图像，提取纯文本
-                text_parts = []
-                for block in content:
-                    if isinstance(block, dict):
-                        if block.get("type") == "text":
-                            text_parts.append(block.get("text", ""))
-                        elif block.get("type") == "tool_result":
-                            # 工具结果，提取内容
-                            tool_content = block.get("content", "")
-                            if isinstance(tool_content, list):
-                                for tc in tool_content:
-                                    if isinstance(tc, dict) and tc.get("type") == "text":
-                                        text_parts.append(tc.get("text", ""))
-                            elif isinstance(tool_content, str):
-                                text_parts.append(tool_content)
-                    elif isinstance(block, str):
-                        text_parts.append(block)
-                content = "\n".join(text_parts)
-                messages.append({"role": role, "content": content})
+            if role == "assistant":
+                # 提取文本块和 tool_use 块
+                tool_use_blocks = [b for b in content if isinstance(b, dict) and b.get("type") == "tool_use"]
+                text_parts = [
+                    b.get("text", "") for b in content
+                    if isinstance(b, dict) and b.get("type") == "text"
+                ] + [b for b in content if isinstance(b, str)]
+
+                openai_msg: dict = {"role": "assistant"}
+                text_content = "\n".join(text_parts)
+                openai_msg["content"] = text_content if text_content else None
+
+                if tool_use_blocks:
+                    openai_msg["tool_calls"] = [
+                        {
+                            "id": b.get("id") or f"call_{uuid.uuid4().hex[:24]}",
+                            "type": "function",
+                            "function": {
+                                "name": b.get("name", ""),
+                                "arguments": json.dumps(b.get("input", {}), ensure_ascii=False),
+                            },
+                        }
+                        for b in tool_use_blocks
+                    ]
+                messages.append(openai_msg)
+
+            else:  # role == "user"
+                # 先处理 tool_result 块 → 转成 role=tool 消息
+                tool_result_blocks = [b for b in content if isinstance(b, dict) and b.get("type") == "tool_result"]
+                for tr in tool_result_blocks:
+                    tr_content = tr.get("content", "")
+                    if isinstance(tr_content, list):
+                        tr_text = "\n".join(
+                            tc.get("text", "") for tc in tr_content
+                            if isinstance(tc, dict) and tc.get("type") == "text"
+                        )
+                    else:
+                        tr_text = str(tr_content) if tr_content else ""
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tr.get("tool_use_id", ""),
+                        "content": tr_text,
+                    })
+
+                # 处理剩余内容（文本 / 图像）
+                remaining = [b for b in content if not (isinstance(b, dict) and b.get("type") == "tool_result")]
+                if remaining:
+                    images = detect_image_content(remaining)
+                    if images:
+                        # 有图像，使用 OpenAI 多模态格式
+                        text_parts = [
+                            b.get("text", "") for b in remaining
+                            if isinstance(b, dict) and b.get("type") == "text"
+                        ] + [b for b in remaining if isinstance(b, str)]
+                        multimodal_content = []
+                        combined_text = "\n".join(text_parts)
+                        if combined_text.strip():
+                            multimodal_content.append({"type": "text", "text": combined_text})
+                        from .vision import convert_to_openai_format
+                        multimodal_content.extend(convert_to_openai_format(images))
+                        messages.append({"role": "user", "content": multimodal_content})
+                    else:
+                        # 无图像，提取纯文本
+                        text_parts = [
+                            b.get("text", "") for b in remaining
+                            if isinstance(b, dict) and b.get("type") == "text"
+                        ] + [b for b in remaining if isinstance(b, str)]
+                        combined = "\n".join(text_parts)
+                        if combined or not tool_result_blocks:
+                            messages.append({"role": "user", "content": combined})
+                # 如果只有 tool_result 没有额外文本/图像，则不追加 user 消息
         else:
             messages.append({"role": role, "content": content})
-    
+
     openai_body["messages"] = messages
-    
+
     # 4. 透传兼容参数
     if "max_tokens" in body:
         openai_body["max_tokens"] = body["max_tokens"]
@@ -429,7 +472,40 @@ def anthropic_to_openai_request(body: dict) -> dict:
         openai_body["stop"] = body["stop_sequences"]
     if "stream" in body:
         openai_body["stream"] = body["stream"]
-    
+
+    # 5. 转换 tools（Anthropic input_schema → OpenAI parameters）
+    if "tools" in body:
+        openai_body["tools"] = [
+            {
+                "type": "function",
+                "function": {
+                    "name": t.get("name", ""),
+                    "description": t.get("description", ""),
+                    "parameters": t.get("input_schema", {}),
+                },
+            }
+            for t in body["tools"]
+        ]
+
+    # 6. 转换 tool_choice
+    if "tool_choice" in body:
+        tc = body["tool_choice"]
+        if isinstance(tc, dict):
+            tc_type = tc.get("type", "auto")
+            if tc_type == "auto":
+                openai_body["tool_choice"] = "auto"
+            elif tc_type == "any":
+                openai_body["tool_choice"] = "required"
+            elif tc_type == "tool":
+                openai_body["tool_choice"] = {
+                    "type": "function",
+                    "function": {"name": tc.get("name", "")},
+                }
+            else:
+                openai_body["tool_choice"] = "auto"
+        elif isinstance(tc, str):
+            openai_body["tool_choice"] = tc
+
     return openai_body
 
 
@@ -1232,79 +1308,133 @@ async def messages_anthropic(request: Request):
             
             # 整个流式传输过程都在锁内进行
             async def generate_anthropic_stream_with_lock():
-                """在锁内完成整个流式传输"""
+                """在锁内完成整个流式传输（含 tool_use 支持）"""
                 async with _api_request_lock:
                     print(f"[iflow2api] 获取上游流式响应 (Anthropic)...")
                     stream_gen = await proxy.chat_completions(openai_body, stream=True)
-                    
+
                     # 发送 message_start
                     yield create_anthropic_stream_message_start(mapped_model).encode('utf-8')
-                    
+
                     output_tokens = 0
                     buffer = ""
-                    current_block_type = None  # 当前内容块类型: None, "thinking", "text"
                     block_index = 0
-                    
+                    stop_reason = "end_turn"
+
+                    # 文本/思考块状态
+                    current_text_block_type = None   # None | "text" | "thinking"
+                    current_text_block_index = -1
+
+                    # 工具调用块状态: openai_tc_index → {block_index, id}
+                    tool_call_block_map: dict = {}
+                    current_tc_index = -1  # 当前正在流式传输的工具调用索引
+
+                    async def _process_parsed_chunk(parsed: dict):
+                        """处理单个已解析的 SSE chunk，yield Anthropic 事件"""
+                        nonlocal block_index, output_tokens, stop_reason
+                        nonlocal current_text_block_type, current_text_block_index
+                        nonlocal current_tc_index
+
+                        choices = parsed.get("choices", [])
+                        if not choices:
+                            return
+                        choice = choices[0]
+                        delta = choice.get("delta", {})
+                        finish_reason = choice.get("finish_reason")
+
+                        # ---- 文本 / 思考内容 ----
+                        content, content_type = extract_content_from_delta(delta, preserve_reasoning)
+                        if content and content_type:
+                            if current_text_block_type != content_type:
+                                if current_text_block_type is not None:
+                                    yield create_anthropic_content_block_stop(current_text_block_index).encode('utf-8')
+                                current_text_block_index = block_index
+                                block_index += 1
+                                yield create_anthropic_content_block_start(current_text_block_index, content_type).encode('utf-8')
+                                current_text_block_type = content_type
+                            output_tokens += len(content) // 4
+                            delta_type = "thinking_delta" if content_type == "thinking" else "text_delta"
+                            yield create_anthropic_content_block_delta(content, current_text_block_index, delta_type).encode('utf-8')
+
+                        # ---- 工具调用 ----
+                        tool_calls_delta = delta.get("tool_calls", [])
+                        for tc in tool_calls_delta:
+                            tc_index = tc.get("index", 0)
+                            tc_id = tc.get("id")
+                            tc_func = tc.get("function", {})
+                            tc_name = tc_func.get("name", "")
+                            tc_args = tc_func.get("arguments", "")
+
+                            if tc_index not in tool_call_block_map:
+                                # 关闭文本块（如果有）
+                                if current_text_block_type is not None:
+                                    yield create_anthropic_content_block_stop(current_text_block_index).encode('utf-8')
+                                    current_text_block_type = None
+                                # 关闭上一个工具调用块（如果有）
+                                if current_tc_index >= 0 and current_tc_index in tool_call_block_map:
+                                    yield create_anthropic_content_block_stop(
+                                        tool_call_block_map[current_tc_index]["block_index"]
+                                    ).encode('utf-8')
+                                # 开始新工具调用块
+                                tc_block_index = block_index
+                                block_index += 1
+                                tool_call_block_map[tc_index] = {
+                                    "block_index": tc_block_index,
+                                    "id": tc_id or f"toolu_{uuid.uuid4().hex[:24]}",
+                                    "name": tc_name or "",
+                                }
+                                current_tc_index = tc_index
+                                yield create_anthropic_tool_use_block_start(
+                                    tc_block_index,
+                                    tool_call_block_map[tc_index]["id"],
+                                    tool_call_block_map[tc_index]["name"],
+                                ).encode('utf-8')
+
+                            # 流式传输参数片段
+                            if tc_args:
+                                yield create_anthropic_input_json_delta(
+                                    tc_args, tool_call_block_map[tc_index]["block_index"]
+                                ).encode('utf-8')
+
+                        # ---- finish_reason ----
+                        if finish_reason == "tool_calls":
+                            stop_reason = "tool_use"
+                        elif finish_reason == "stop":
+                            stop_reason = "end_turn"
+                        elif finish_reason == "length":
+                            stop_reason = "max_tokens"
+
                     async for chunk in stream_gen:
-                        # OpenAI 流式数据是 bytes，需要解码
                         chunk_str = chunk.decode('utf-8') if isinstance(chunk, bytes) else chunk
                         buffer += chunk_str
-                        
-                        # 按行处理
+
                         while "\n" in buffer:
                             line, buffer = buffer.split("\n", 1)
                             parsed = parse_openai_sse_chunk(line)
                             if parsed:
-                                choices = parsed.get("choices", [])
-                                if choices:
-                                    delta = choices[0].get("delta", {})
-                                    content, content_type = extract_content_from_delta(delta, preserve_reasoning)
-                                    if content and content_type:
-                                        # 如果内容类型变化，需要关闭当前块并开始新块
-                                        if current_block_type != content_type:
-                                            # 关闭之前的块（如果有）
-                                            if current_block_type is not None:
-                                                yield create_anthropic_content_block_stop(block_index).encode('utf-8')
-                                                block_index += 1
-                                            # 开始新块
-                                            yield create_anthropic_content_block_start(block_index, content_type).encode('utf-8')
-                                            current_block_type = content_type
-                                        
-                                        output_tokens += len(content) // 4  # 粗略估计 token
-                                        # 根据内容类型选择 delta 类型
-                                        delta_type = "thinking_delta" if content_type == "thinking" else "text_delta"
-                                        yield create_anthropic_content_block_delta(content, block_index, delta_type).encode('utf-8')
-                    
+                                async for evt in _process_parsed_chunk(parsed):
+                                    yield evt
+
                     # 处理剩余 buffer
                     for line in buffer.split("\n"):
                         if line.strip():
                             parsed = parse_openai_sse_chunk(line)
                             if parsed:
-                                choices = parsed.get("choices", [])
-                                if choices:
-                                    delta = choices[0].get("delta", {})
-                                    content, content_type = extract_content_from_delta(delta, preserve_reasoning)
-                                    if content and content_type:
-                                        # 如果内容类型变化，需要关闭当前块并开始新块
-                                        if current_block_type != content_type:
-                                            # 关闭之前的块（如果有）
-                                            if current_block_type is not None:
-                                                yield create_anthropic_content_block_stop(block_index).encode('utf-8')
-                                                block_index += 1
-                                            # 开始新块
-                                            yield create_anthropic_content_block_start(block_index, content_type).encode('utf-8')
-                                            current_block_type = content_type
-                                        
-                                        output_tokens += len(content) // 4
-                                        delta_type = "thinking_delta" if content_type == "thinking" else "text_delta"
-                                        yield create_anthropic_content_block_delta(content, block_index, delta_type).encode('utf-8')
-                    
-                    # 关闭最后一个内容块（如果有）
-                    if current_block_type is not None:
-                        yield create_anthropic_content_block_stop(block_index).encode('utf-8')
-                    
+                                async for evt in _process_parsed_chunk(parsed):
+                                    yield evt
+
+                    # 关闭最后打开的文本块
+                    if current_text_block_type is not None:
+                        yield create_anthropic_content_block_stop(current_text_block_index).encode('utf-8')
+
+                    # 关闭最后打开的工具调用块
+                    if current_tc_index >= 0 and current_tc_index in tool_call_block_map:
+                        yield create_anthropic_content_block_stop(
+                            tool_call_block_map[current_tc_index]["block_index"]
+                        ).encode('utf-8')
+
                     # 发送结束事件
-                    yield create_anthropic_message_delta("end_turn", output_tokens).encode('utf-8')
+                    yield create_anthropic_message_delta(stop_reason, output_tokens).encode('utf-8')
                     yield create_anthropic_message_stop().encode('utf-8')
 
             return StreamingResponse(
@@ -1324,7 +1454,9 @@ async def messages_anthropic(request: Request):
                 openai_result = await proxy.chat_completions(openai_body, stream=False)
             print(f"[iflow2api] 收到 OpenAI 格式响应: {json.dumps(openai_result, ensure_ascii=False)[:300]}")
             anthropic_result = openai_to_anthropic_response(openai_result, mapped_model)
-            print(f"[iflow2api] Anthropic 格式响应: id={anthropic_result['id']}, content_length={len(anthropic_result['content'][0]['text'])}")
+            first_block = anthropic_result['content'][0] if anthropic_result['content'] else {}
+            first_preview = first_block.get('text') or first_block.get('name') or ''
+            print(f"[iflow2api] Anthropic 格式响应: id={anthropic_result['id']}, stop_reason={anthropic_result['stop_reason']}, first_block_preview={first_preview[:80]}")
             return JSONResponse(content=anthropic_result)
 
     except json.JSONDecodeError as e:
