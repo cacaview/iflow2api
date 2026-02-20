@@ -30,7 +30,7 @@
 - **Web 管理界面** - 独立管理页面，支持远程管理和登录认证
 - **多实例管理** - 支持多个服务实例、不同端口配置
 - **API 文档页面** - Swagger UI (`/docs`) + ReDoc (`/redoc`)
-- **速率限制** - 客户端请求限流、可配置限流规则
+- **并发控制** - 可配置 API 并发数，控制同时处理的请求数量
 
 ### 高级功能
 
@@ -393,7 +393,6 @@ iflow2api/
 ├── autostart.py         # 开机自启动
 ├── i18n.py              # 国际化支持
 ├── crypto.py            # 配置加密
-├── ratelimit.py         # 速率限制
 ├── instances.py         # 多实例管理
 ├── server.py            # 服务器管理
 ├── web_server.py        # Web 服务器

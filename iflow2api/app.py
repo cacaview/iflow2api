@@ -20,8 +20,6 @@ logger = logging.getLogger("iflow2api")
 from .config import load_iflow_config, check_iflow_login, IFlowConfig, save_iflow_config
 from .proxy import IFlowProxy
 from .token_refresher import OAuthTokenRefresher
-from .ratelimit import RateLimitConfig, init_limiter, create_rate_limit_middleware, get_rate_limiter as _ratelimit_get_rate_limiter
-from .ratelimit import RateLimiter
 from .vision import (
     is_vision_model,
     supports_vision,
@@ -517,7 +515,6 @@ def anthropic_to_openai_request(body: dict) -> dict:
 _proxy: Optional[IFlowProxy] = None
 _config: Optional[IFlowConfig] = None
 _refresher: Optional[OAuthTokenRefresher] = None
-_rate_limiter: Optional[RateLimiter] = None
 
 # 上游 API 并发信号量 - 在 lifespan 中根据配置初始化
 _api_request_lock: Optional[asyncio.Semaphore] = None
@@ -530,12 +527,6 @@ def get_proxy() -> IFlowProxy:
         _config = load_iflow_config()
         _proxy = IFlowProxy(_config)
     return _proxy
-
-
-def get_rate_limiter() -> Optional[RateLimiter]:
-    """获取速率限制器实例"""
-    global _rate_limiter
-    return _rate_limiter
 
 
 def update_proxy_token(token_data: dict):
@@ -560,7 +551,7 @@ def update_proxy_token(token_data: dict):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
-    global _refresher, _proxy, _rate_limiter, _api_request_lock
+    global _refresher, _proxy, _api_request_lock
     # 启动时打印版本和系统信息
     logger.info("%s", get_startup_info())
     
@@ -579,7 +570,7 @@ async def lifespan(app: FastAPI):
         _refresher.start()
         logger.info("已启动 Token 自动刷新任务")
         
-        # 初始化速率限制器和并发信号量
+        # 初始化并发信号量
         from .settings import load_settings
         settings = load_settings()
         
@@ -588,19 +579,6 @@ async def lifespan(app: FastAPI):
         logger.info("上游 API 并发数: %d", settings.api_concurrency)
         if settings.api_concurrency > 1:
             logger.warning("警告: 并发数 > 1 可能导致上游 API 返回 429 限流错误，建议保持默认值 1")
-        
-        rate_limit_config = RateLimitConfig(
-            enabled=settings.rate_limit_enabled,
-            requests_per_minute=settings.rate_limit_per_minute,
-            requests_per_hour=settings.rate_limit_per_hour,
-            requests_per_day=settings.rate_limit_per_day,
-        )
-        init_limiter(rate_limit_config)
-        _rate_limiter = _ratelimit_get_rate_limiter()
-        logger.info("速率限制: %s", '已启用' if settings.rate_limit_enabled else '已禁用')
-        if settings.rate_limit_enabled:
-            logger.info("限流规则: %d/分钟, %d/小时, %d/天",
-                        settings.rate_limit_per_minute, settings.rate_limit_per_hour, settings.rate_limit_per_day)
         
     except FileNotFoundError as e:
         logger.error("%s", e)
@@ -674,9 +652,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# 添加速率限制中间件
-app.middleware("http")(create_rate_limit_middleware())
 
 
 # ============ 请求体大小限制中间件 ============
@@ -1152,7 +1127,7 @@ async def chat_completions_openai(request: Request):
                                     "model": model,
                                     "choices": [{
                                         "index": 0,
-                                        "delta": {"role": "assistant", "content": "[Error] 上游 API 返回了空响应，可能是对话过长或服务暂时不可用，请缩短对话后重试。"},
+                                        "delta": {"role": "assistant", "content": "上游api返回空信息，可能是上下文超限了"},
                                         "finish_reason": "stop"
                                     }]
                                 }

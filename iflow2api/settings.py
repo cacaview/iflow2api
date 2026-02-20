@@ -42,18 +42,12 @@ class AppSettings(BaseModel):
     # 主题设置
     theme_mode: str = "system"
 
-    # 速率限制设置（M-08: 范围校验）
-    rate_limit_enabled: bool = True
-    rate_limit_per_minute: int = Field(default=60, ge=1, le=100000)
-    rate_limit_per_hour: int = Field(default=1000, ge=1, le=1000000)
-    rate_limit_per_day: int = Field(default=10000, ge=1, le=10000000)
-
     # 思考链设置
     preserve_reasoning_content: bool = True
 
     # 上游 API 并发设置
     # 注意：过高的并发数可能导致上游 API 返回 429 限流错误
-    # 默认值为 1，表示串行处理；建议范围 1-5
+    # 默认值为 1，表示串行处理；建议范围 1-10
     api_concurrency: int = Field(default=1, ge=1, le=10)
 
     # 语言设置
@@ -147,15 +141,6 @@ def load_settings() -> AppSettings:
                     settings.auto_run_server = data["auto_run_server"]
                 if "theme_mode" in data:
                     settings.theme_mode = data["theme_mode"]
-                # 速率限制设置
-                if "rate_limit_enabled" in data:
-                    settings.rate_limit_enabled = data["rate_limit_enabled"]
-                if "rate_limit_per_minute" in data:
-                    settings.rate_limit_per_minute = data["rate_limit_per_minute"]
-                if "rate_limit_per_hour" in data:
-                    settings.rate_limit_per_hour = data["rate_limit_per_hour"]
-                if "rate_limit_per_day" in data:
-                    settings.rate_limit_per_day = data["rate_limit_per_day"]
                 # 语言设置
                 if "language" in data:
                     settings.language = data["language"]
@@ -239,11 +224,6 @@ def save_settings(settings: AppSettings) -> None:
         "close_action": settings.close_action,
         "auto_run_server": settings.auto_run_server,
         "theme_mode": settings.theme_mode,
-        # 速率限制设置
-        "rate_limit_enabled": settings.rate_limit_enabled,
-        "rate_limit_per_minute": settings.rate_limit_per_minute,
-        "rate_limit_per_hour": settings.rate_limit_per_hour,
-        "rate_limit_per_day": settings.rate_limit_per_day,
         # 思考链设置
         "preserve_reasoning_content": settings.preserve_reasoning_content,
         # 上游 API 并发设置

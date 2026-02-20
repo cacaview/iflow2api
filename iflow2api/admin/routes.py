@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 
@@ -51,12 +51,19 @@ class SettingsUpdate(BaseModel):
     close_action: Optional[str] = None  # 关闭按钮行为: exit, minimize_to_tray, minimize_to_taskbar
     auto_run_server: Optional[bool] = None
     theme_mode: Optional[str] = None
-    rate_limit_enabled: Optional[bool] = None
-    rate_limit_per_minute: Optional[int] = None
-    rate_limit_per_hour: Optional[int] = None
-    rate_limit_per_day: Optional[int] = None
     preserve_reasoning_content: Optional[bool] = None
+    api_concurrency: Optional[int] = None
     language: Optional[str] = None
+    api_key: Optional[str] = None
+    base_url: Optional[str] = None
+    custom_api_key: Optional[str] = None
+    custom_auth_header: Optional[str] = None
+
+
+class OAuthCallbackRequest(BaseModel):
+    """OAuth 回调请求"""
+    code: str
+    state: Optional[str] = None
 
 
 # 认证依赖
@@ -270,17 +277,7 @@ async def get_status(username: str = Depends(get_current_user)) -> dict[str, Any
 @admin_router.get("/metrics")
 async def get_metrics(username: str = Depends(get_current_user)) -> dict[str, Any]:
     """获取性能指标"""
-    rate_limit_stats = {}
     proxy_stats = {}
-    
-    # 获取速率限制统计
-    try:
-        from ..ratelimit import get_rate_limiter as get_limiter
-        limiter = get_limiter()
-        if limiter:
-            rate_limit_stats = limiter.get_stats()
-    except Exception as e:
-        rate_limit_stats = {"error": str(e)}
     
     # 获取代理统计
     try:
@@ -292,7 +289,6 @@ async def get_metrics(username: str = Depends(get_current_user)) -> dict[str, An
         proxy_stats = {"error": str(e)}
     
     return {
-        "rate_limit": rate_limit_stats,
         "proxy": proxy_stats,
         "timestamp": datetime.now().isoformat(),
     }
@@ -314,13 +310,14 @@ async def get_settings(username: str = Depends(get_current_user)) -> dict[str, A
         "close_action": settings.close_action,
         "auto_run_server": settings.auto_run_server,
         "theme_mode": settings.theme_mode,
-        "rate_limit_enabled": settings.rate_limit_enabled,
-        "rate_limit_per_minute": settings.rate_limit_per_minute,
-        "rate_limit_per_hour": settings.rate_limit_per_hour,
-        "rate_limit_per_day": settings.rate_limit_per_day,
         "preserve_reasoning_content": settings.preserve_reasoning_content,
+        "api_concurrency": settings.api_concurrency,
         "language": settings.language,
-        # 不返回敏感信息
+        "api_key": settings.api_key,
+        "base_url": settings.base_url,
+        "custom_api_key": settings.custom_api_key,
+        "custom_auth_header": settings.custom_auth_header,
+        # 不返回 OAuth 敏感信息
     }
 
 
@@ -352,18 +349,20 @@ async def update_settings(
         settings.auto_run_server = request.auto_run_server
     if request.theme_mode is not None:
         settings.theme_mode = request.theme_mode
-    if request.rate_limit_enabled is not None:
-        settings.rate_limit_enabled = request.rate_limit_enabled
-    if request.rate_limit_per_minute is not None:
-        settings.rate_limit_per_minute = request.rate_limit_per_minute
-    if request.rate_limit_per_hour is not None:
-        settings.rate_limit_per_hour = request.rate_limit_per_hour
-    if request.rate_limit_per_day is not None:
-        settings.rate_limit_per_day = request.rate_limit_per_day
     if request.preserve_reasoning_content is not None:
         settings.preserve_reasoning_content = request.preserve_reasoning_content
+    if request.api_concurrency is not None:
+        settings.api_concurrency = request.api_concurrency
     if request.language is not None:
         settings.language = request.language
+    if request.api_key is not None:
+        settings.api_key = request.api_key
+    if request.base_url is not None:
+        settings.base_url = request.base_url
+    if request.custom_api_key is not None:
+        settings.custom_api_key = request.custom_api_key
+    if request.custom_auth_header is not None:
+        settings.custom_auth_header = request.custom_auth_header
     
     save_settings(settings)
     
@@ -375,6 +374,177 @@ async def update_settings(
     })
     
     return {"success": True, "message": "设置已保存"}
+
+
+# ==================== iFlow 配置 ====================
+
+@admin_router.post("/import-from-cli")
+async def import_from_cli(
+    username: str = Depends(get_current_user),
+) -> dict[str, Any]:
+    """从 iFlow CLI 导入配置"""
+    from ..settings import import_from_iflow_cli
+    
+    config = import_from_iflow_cli()
+    if config:
+        return {
+            "success": True,
+            "message": "已从 iFlow CLI 导入配置",
+            "api_key": config.api_key,
+            "base_url": config.base_url,
+        }
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="无法导入 iFlow CLI 配置，请确保已运行 iflow 并完成登录"
+        )
+
+
+@admin_router.get("/oauth/url")
+async def get_oauth_url(
+    request: Request,
+    username: str = Depends(get_current_user),
+) -> dict[str, Any]:
+    """获取 iFlow OAuth 登录 URL"""
+    from ..oauth import IFlowOAuth
+    
+    oauth = IFlowOAuth()
+    # 从请求中获取实际端口
+    port = request.url.port or 28000
+    redirect_uri = f"http://localhost:{port}/admin/oauth/callback"
+    auth_url = oauth.get_auth_url(redirect_uri=redirect_uri)
+    
+    return {
+        "success": True,
+        "auth_url": auth_url,
+        "redirect_uri": redirect_uri,
+    }
+
+
+@admin_router.get("/oauth/callback")
+async def oauth_callback_get(code: str, state: Optional[str] = None):
+    """处理 OAuth 回调（GET 请求 - 从 iFlow 重定向回来）
+    
+    返回一个 HTML 页面，通过 postMessage 将授权码发送回父窗口
+    """
+    from fastapi.responses import HTMLResponse
+    
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>OAuth 回调</title>
+        <style>
+            body {{
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                height: 100vh;
+                margin: 0;
+                background: #f5f5f5;
+            }}
+            .container {{
+                text-align: center;
+                padding: 40px;
+                background: white;
+                border-radius: 8px;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            }}
+            .spinner {{
+                width: 40px;
+                height: 40px;
+                border: 3px solid #f3f3f3;
+                border-top: 3px solid #3498db;
+                border-radius: 50%;
+                animation: spin 1s linear infinite;
+                margin: 0 auto 20px;
+            }}
+            @keyframes spin {{
+                0% {{ transform: rotate(0deg); }}
+                100% {{ transform: rotate(360deg); }}
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="spinner"></div>
+            <p>正在处理登录...</p>
+        </div>
+        <script>
+            // 将授权码发送回父窗口
+            if (window.opener) {{
+                window.opener.postMessage({{
+                    type: 'oauth_callback',
+                    code: '{code}',
+                    state: '{state or ''}'
+                }}, '*');
+                // 关闭当前窗口
+                setTimeout(function() {{
+                    window.close();
+                }}, 1000);
+            }} else {{
+                // 如果没有 opener，显示错误
+                document.querySelector('.container').innerHTML =
+                    '<p style="color: red;">错误：无法与父窗口通信</p>' +
+                    '<p>请手动关闭此窗口</p>';
+            }}
+        </script>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html_content)
+
+
+@admin_router.post("/oauth/callback")
+async def oauth_callback(
+    callback_request: OAuthCallbackRequest,
+    fastapi_request: Request,
+    username: str = Depends(get_current_user),
+) -> dict[str, Any]:
+    """处理 OAuth 回调（POST 请求 - 从前端发送）"""
+    from ..oauth import IFlowOAuth
+    from ..settings import load_settings, save_settings
+    
+    oauth = IFlowOAuth()
+    # 从请求中获取实际端口
+    port = fastapi_request.url.port or 28000
+    redirect_uri = f"http://localhost:{port}/admin/oauth/callback"
+    
+    try:
+        # 使用授权码获取 token
+        token_data = await oauth.get_token(callback_request.code, redirect_uri=redirect_uri)
+        access_token = token_data.get("access_token")
+        
+        if not access_token:
+            raise HTTPException(status_code=400, detail="OAuth 响应缺少 access_token")
+        
+        # 获取用户信息（包含 API Key）
+        user_info = await oauth.get_user_info(access_token)
+        api_key = user_info.get("apiKey")
+        
+        if not api_key:
+            raise HTTPException(status_code=400, detail="无法获取 API Key")
+        
+        # 保存配置
+        settings = load_settings()
+        settings.api_key = api_key
+        settings.auth_type = "oauth-iflow"
+        settings.oauth_access_token = access_token
+        if token_data.get("refresh_token"):
+            settings.oauth_refresh_token = token_data["refresh_token"]
+        if token_data.get("expires_at"):
+            settings.oauth_expires_at = token_data["expires_at"].isoformat()
+        save_settings(settings)
+        
+        return {
+            "success": True,
+            "message": "登录成功！配置已自动更新",
+            "api_key": api_key,
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"OAuth 登录失败: {str(e)}")
 
 
 # ==================== 服务器控制 ====================

@@ -170,6 +170,30 @@
 
                 <!-- 设置页面 -->
                 <section id="settings-section" class="section">
+                    <!-- iFlow 配置 -->
+                    <div class="card">
+                        <div class="card-header">
+                            <span class="icon">🔑</span>
+                            <span>iFlow 配置</span>
+                        </div>
+                        <div class="card-body">
+                            <form id="iflow-settings-form">
+                                <div class="form-group">
+                                    <label for="setting-api-key">API Key</label>
+                                    <input type="password" id="setting-api-key" name="api_key" placeholder="输入 API Key">
+                                </div>
+                                <div class="form-group">
+                                    <label for="setting-base-url">Base URL</label>
+                                    <input type="text" id="setting-base-url" name="base_url" placeholder="https://apis.iflow.cn/v1">
+                                </div>
+                                <div class="form-row">
+                                    <button type="button" id="import-cli-btn" class="btn btn-secondary">从 iFlow CLI 导入</button>
+                                    <button type="button" id="oauth-login-btn" class="btn btn-primary">Login with iFlow</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+
                     <div class="card">
                         <div class="card-header">
                             <span class="icon">🌐</span>
@@ -244,43 +268,52 @@
 
                     <div class="card">
                         <div class="card-header">
-                            <span class="icon">⚡</span>
-                            <span>速率限制</span>
+                            <span class="icon">🧠</span>
+                            <span>内容处理设置</span>
                         </div>
                         <div class="card-body">
-                            <form id="rate-limit-settings-form">
+                            <form id="content-settings-form">
                                 <div class="form-group checkbox">
-                                    <input type="checkbox" id="setting-rate-limit-enabled" name="rate_limit_enabled">
-                                    <label for="setting-rate-limit-enabled">启用速率限制</label>
+                                    <input type="checkbox" id="setting-preserve-reasoning" name="preserve_reasoning_content">
+                                    <label for="setting-preserve-reasoning">保留思考过程 (reasoning_content)</label>
                                 </div>
-                                <div class="form-group">
-                                    <label for="setting-rate-limit-minute">每分钟最大请求数</label>
-                                    <input type="number" id="setting-rate-limit-minute" name="rate_limit_per_minute" min="1">
-                                </div>
-                                <div class="form-group">
-                                    <label for="setting-rate-limit-hour">每小时最大请求数</label>
-                                    <input type="number" id="setting-rate-limit-hour" name="rate_limit_per_hour" min="1">
-                                </div>
-                                <div class="form-group">
-                                    <label for="setting-rate-limit-day">每天最大请求数</label>
-                                    <input type="number" id="setting-rate-limit-day" name="rate_limit_per_day" min="1">
-                                </div>
+                                <p class="hint">启用后，模型返回的思考过程将单独保留，客户端可分别处理思考过程和最终回答。</p>
                             </form>
                         </div>
                     </div>
 
                     <div class="card">
                         <div class="card-header">
-                            <span class="icon">🧠</span>
-                            <span>思考链设置</span>
+                            <span class="icon">⚡</span>
+                            <span>上游 API 设置</span>
                         </div>
                         <div class="card-body">
-                            <form id="cot-settings-form">
-                                <div class="form-group checkbox">
-                                    <input type="checkbox" id="setting-preserve-reasoning" name="preserve_reasoning_content">
-                                    <label for="setting-preserve-reasoning">保留思考过程 (reasoning_content)</label>
+                            <form id="api-settings-form">
+                                <div class="form-group">
+                                    <label for="setting-api-concurrency">并发数</label>
+                                    <input type="number" id="setting-api-concurrency" name="api_concurrency" min="1" max="10" value="1">
                                 </div>
-                                <p class="hint">启用后，模型返回的思考过程将单独保留，客户端可分别处理思考过程和最终回答。</p>
+                                <p class="hint">上游 API 同时处理的请求数量（1-10）。警告：过高的并发数可能导致上游 API 返回 429 限流错误，建议保持默认值 1</p>
+                            </form>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">
+                            <span class="icon">🔒</span>
+                            <span>安全认证设置</span>
+                        </div>
+                        <div class="card-body">
+                            <form id="security-settings-form">
+                                <div class="form-group">
+                                    <label for="setting-custom-api-key">API 密钥</label>
+                                    <input type="password" id="setting-custom-api-key" name="custom_api_key" placeholder="留空则不验证">
+                                </div>
+                                <div class="form-group">
+                                    <label for="setting-custom-auth-header">授权标头名称</label>
+                                    <input type="text" id="setting-custom-auth-header" name="custom_auth_header" placeholder="如：Authorization, cs-sk-key 等">
+                                </div>
+                                <p class="hint">设置 API 密钥后，客户端请求时需携带此密钥进行验证</p>
                             </form>
                         </div>
                     </div>

@@ -49,10 +49,6 @@ docker stop iflow2api
 |--------|--------|------|
 | `HOST` | `0.0.0.0` | 监听地址 |
 | `PORT` | `28000` | 监听端口 |
-| `RATE_LIMIT_ENABLED` | `true` | 是否启用速率限制 |
-| `RATE_LIMIT_PER_MINUTE` | `60` | 每分钟最大请求数 |
-| `RATE_LIMIT_PER_HOUR` | `1000` | 每小时最大请求数 |
-| `RATE_LIMIT_PER_DAY` | `10000` | 每天最大请求数 |
 
 ### 挂载配置文件
 

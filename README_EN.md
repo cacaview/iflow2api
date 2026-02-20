@@ -30,7 +30,7 @@ Exposes iFlow CLI's AI services as an OpenAI-compatible API.
 - **Web Admin Interface** - Independent management page, remote management and authentication
 - **Multi-instance Management** - Multiple service instances, different port configurations
 - **API Documentation** - Swagger UI (`/docs`) + ReDoc (`/redoc`)
-- **Rate Limiting** - Client request throttling, configurable rules
+- **Concurrency Control** - Configurable API concurrency, control simultaneous requests
 
 ### Advanced Features
 
@@ -391,7 +391,6 @@ iflow2api/
 ├── autostart.py         # Auto-start on boot
 ├── i18n.py              # Internationalization support
 ├── crypto.py            # Configuration encryption
-├── ratelimit.py         # Rate limiting
 ├── instances.py         # Multi-instance management
 ├── server.py            # Server management
 ├── web_server.py        # Web server

@@ -13,7 +13,7 @@ from typing import Optional
 
 # 从 pyproject.toml 读取的版本号
 # 注意：安装后可以通过 importlib.metadata 获取
-__version__ = "1.3.7"
+__version__ = "1.4.7"
 
 
 def get_version() -> str:

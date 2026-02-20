@@ -64,9 +64,8 @@ class ServerManager:
         if self._state in (ServerState.RUNNING, ServerState.STARTING):
             return False
 
-        if not settings.api_key:
-            self._set_state(ServerState.ERROR, "API Key 未配置")
-            return False
+        # 注意：不再强制检查 api_key，允许在没有配置的情况下启动服务
+        # 这样用户可以通过 webui 进行 OAuth 登录配置
 
         # 检查端口是否可用
         if not is_port_available(settings.host, settings.port):

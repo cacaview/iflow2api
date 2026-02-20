@@ -297,20 +297,33 @@ async function loadSettings() {
         const data = await apiRequest('/settings');
         state.settings = data;
 
-        // 填充表单
+        // 填充 iFlow 配置
+        document.getElementById('setting-api-key').value = data.api_key || '';
+        document.getElementById('setting-base-url').value = data.base_url || '';
+        
+        // 填充服务器配置
         document.getElementById('setting-host').value = data.host || '';
         document.getElementById('setting-port').value = data.port || 28000;
+        
+        // 填充启动设置
         document.getElementById('setting-auto-start').checked = data.auto_start || false;
         document.getElementById('setting-start-minimized').checked = data.start_minimized || false;
-        document.getElementById('setting-minimize-to-tray').checked = data.minimize_to_tray || false;
+        document.getElementById('setting-minimize-to-tray').checked = data.close_action === 'minimize_to_tray';
         document.getElementById('setting-auto-run-server').checked = data.auto_run_server || false;
+        
+        // 填充界面设置
         document.getElementById('setting-theme').value = data.theme_mode || 'system';
         document.getElementById('setting-language').value = data.language || 'zh';
-        document.getElementById('setting-rate-limit-enabled').checked = data.rate_limit_enabled || false;
-        document.getElementById('setting-rate-limit-minute').value = data.rate_limit_per_minute || 60;
-        document.getElementById('setting-rate-limit-hour').value = data.rate_limit_per_hour || 1000;
-        document.getElementById('setting-rate-limit-day').value = data.rate_limit_per_day || 10000;
+        
+        // 填充内容处理设置
         document.getElementById('setting-preserve-reasoning').checked = data.preserve_reasoning_content || false;
+        
+        // 填充上游 API 设置
+        document.getElementById('setting-api-concurrency').value = data.api_concurrency || 1;
+        
+        // 填充安全认证设置
+        document.getElementById('setting-custom-api-key').value = data.custom_api_key || '';
+        document.getElementById('setting-custom-auth-header').value = data.custom_auth_header || '';
 
     } catch (error) {
         console.error('Load settings error:', error);
@@ -322,19 +335,27 @@ async function loadSettings() {
  */
 async function saveSettings() {
     const settings = {
+        // iFlow 配置
+        api_key: document.getElementById('setting-api-key').value,
+        base_url: document.getElementById('setting-base-url').value,
+        // 服务器配置
         host: document.getElementById('setting-host').value,
         port: parseInt(document.getElementById('setting-port').value),
+        // 启动设置
         auto_start: document.getElementById('setting-auto-start').checked,
         start_minimized: document.getElementById('setting-start-minimized').checked,
-        minimize_to_tray: document.getElementById('setting-minimize-to-tray').checked,
+        close_action: document.getElementById('setting-minimize-to-tray').checked ? 'minimize_to_tray' : 'exit',
         auto_run_server: document.getElementById('setting-auto-run-server').checked,
+        // 界面设置
         theme_mode: document.getElementById('setting-theme').value,
         language: document.getElementById('setting-language').value,
-        rate_limit_enabled: document.getElementById('setting-rate-limit-enabled').checked,
-        rate_limit_per_minute: parseInt(document.getElementById('setting-rate-limit-minute').value),
-        rate_limit_per_hour: parseInt(document.getElementById('setting-rate-limit-hour').value),
-        rate_limit_per_day: parseInt(document.getElementById('setting-rate-limit-day').value),
+        // 内容处理设置
         preserve_reasoning_content: document.getElementById('setting-preserve-reasoning').checked,
+        // 上游 API 设置
+        api_concurrency: parseInt(document.getElementById('setting-api-concurrency').value) || 1,
+        // 安全认证设置
+        custom_api_key: document.getElementById('setting-custom-api-key').value,
+        custom_auth_header: document.getElementById('setting-custom-auth-header').value,
     };
 
     try {
@@ -343,6 +364,79 @@ async function saveSettings() {
             body: JSON.stringify(settings),
         });
         showToast('设置已保存', 'success');
+    } catch (error) {
+        showToast(error.message, 'error');
+    }
+}
+
+/**
+ * 从 iFlow CLI 导入配置
+ */
+async function importFromCli() {
+    try {
+        const data = await apiRequest('/import-from-cli', { method: 'POST' });
+        showToast(data.message, 'success');
+        // 更新表单
+        document.getElementById('setting-api-key').value = data.api_key || '';
+        document.getElementById('setting-base-url').value = data.base_url || '';
+    } catch (error) {
+        showToast(error.message, 'error');
+    }
+}
+
+/**
+ * OAuth 登录
+ */
+let _oauthMessageHandler = null;
+
+async function oauthLogin() {
+    try {
+        // 获取 OAuth URL
+        const data = await apiRequest('/oauth/url');
+        const authUrl = data.auth_url;
+        
+        // 打开新窗口进行 OAuth 登录
+        const width = 600;
+        const height = 700;
+        const left = (window.innerWidth - width) / 2;
+        const top = (window.innerHeight - height) / 2;
+        
+        const oauthWindow = window.open(
+            authUrl,
+            'iFlow OAuth',
+            `width=${width},height=${height},left=${left},top=${top},toolbar=no,menubar=no`
+        );
+        
+        // 移除之前的监听器（避免重复添加）
+        if (_oauthMessageHandler) {
+            window.removeEventListener('message', _oauthMessageHandler);
+        }
+        
+        // 创建新的 OAuth 回调消息监听器
+        _oauthMessageHandler = async (event) => {
+            if (event.data && event.data.type === 'oauth_callback') {
+                const code = event.data.code;
+                if (code) {
+                    try {
+                        const result = await apiRequest('/oauth/callback', {
+                            method: 'POST',
+                            body: JSON.stringify({ code }),
+                        });
+                        showToast(result.message, 'success');
+                        // 更新表单
+                        document.getElementById('setting-api-key').value = result.api_key || '';
+                    } catch (error) {
+                        showToast(error.message, 'error');
+                    }
+                }
+                // 处理完成后移除监听器
+                window.removeEventListener('message', _oauthMessageHandler);
+                _oauthMessageHandler = null;
+            }
+        };
+        
+        window.addEventListener('message', _oauthMessageHandler);
+        
     } catch (error) {
         showToast(error.message, 'error');
     }
@@ -478,17 +572,14 @@ function connectWebSocket() {
     }
 
     const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${wsProtocol}//${location.host}${API_BASE}/ws`;
+    // 在 URL 中添加 token 查询参数（后端要求在握手阶段验证）
+    const wsUrl = `${wsProtocol}//${location.host}${API_BASE}/ws?token=${encodeURIComponent(state.token)}`;
 
     state.ws = new WebSocket(wsUrl);
 
     state.ws.onopen = () => {
         console.log('WebSocket connected');
-        // 发送认证
-        state.ws.send(JSON.stringify({
-            type: 'auth',
-            token: state.token,
-        }));
+        // 连接已通过 URL 参数认证，无需再发送 auth 消息
     };
 
     state.ws.onmessage = (event) => {
@@ -578,6 +669,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // 设置保存
     document.getElementById('save-settings-btn').addEventListener('click', saveSettings);
     document.getElementById('reset-settings-btn').addEventListener('click', loadSettings);
+
+    // iFlow 配置按钮
+    document.getElementById('import-cli-btn').addEventListener('click', importFromCli);
+    document.getElementById('oauth-login-btn').addEventListener('click', oauthLogin);
 
     // 添加用户表单
     document.getElementById('add-user-form').addEventListener('submit', (e) => {

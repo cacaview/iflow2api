@@ -20,7 +20,6 @@ from .settings import (
 from .server import ServerManager, ServerState
 from .tray import TrayManager, is_tray_available
 from .i18n import t, set_language, get_available_languages
-from .ratelimit import RateLimitConfig, get_rate_limiter, update_rate_limiter_settings
 from .updater import (
     get_current_version,
     check_for_updates,
@@ -649,33 +648,6 @@ class IFlow2ApiApp:
             width=200,
         )
         
-        # === 速率限制设置 ===
-        rate_limit_enabled_checkbox = ft.Checkbox(
-            label=t("settings.rate_limit_enabled"),
-            value=self.settings.rate_limit_enabled,
-        )
-        
-        requests_per_minute_field = ft.TextField(
-            label=t("settings.requests_per_minute"),
-            value=str(self.settings.rate_limit_per_minute),
-            keyboard_type=ft.KeyboardType.NUMBER,
-            width=150,
-        )
-        
-        requests_per_hour_field = ft.TextField(
-            label=t("settings.requests_per_hour"),
-            value=str(self.settings.rate_limit_per_hour),
-            keyboard_type=ft.KeyboardType.NUMBER,
-            width=150,
-        )
-        
-        requests_per_day_field = ft.TextField(
-            label=t("settings.requests_per_day"),
-            value=str(self.settings.rate_limit_per_day),
-            keyboard_type=ft.KeyboardType.NUMBER,
-            width=150,
-        )
-        
         # === 自定义 API 鉴权设置 ===
         custom_api_key_field = ft.TextField(
             label=t("settings.custom_api_key"),
@@ -729,22 +701,6 @@ class IFlow2ApiApp:
             except ValueError:
                 api_concurrency = 1
             self.settings.api_concurrency = api_concurrency
-            
-            # 更新速率限制设置
-            try:
-                per_minute = int(requests_per_minute_field.value or "60")
-                per_hour = int(requests_per_hour_field.value or "1000")
-                per_day = int(requests_per_day_field.value or "10000")
-            except ValueError:
-                per_minute, per_hour, per_day = 60, 1000, 10000
-            
-            self.settings.rate_limit_enabled = rate_limit_enabled_checkbox.value
-            self.settings.rate_limit_per_minute = per_minute
-            self.settings.rate_limit_per_hour = per_hour
-            self.settings.rate_limit_per_day = per_day
-            
-            # 更新全局速率限制器
-            update_rate_limiter_settings(per_minute, per_hour, per_day)
             
             # 更新自定义 API 鉴权设置
             self.settings.custom_api_key = custom_api_key_field.value or ""
@@ -812,20 +768,6 @@ class IFlow2ApiApp:
                 ft.Text(t("settings.section.appearance"), weight=ft.FontWeight.BOLD, size=14),
                 ft.Row([theme_dropdown], alignment=ft.MainAxisAlignment.START),
                 ft.Row([language_dropdown], alignment=ft.MainAxisAlignment.START),
-                
-                ft.Divider(),
-                
-                # 速率限制设置
-                ft.Text(t("settings.section.rate_limit"), weight=ft.FontWeight.BOLD, size=14),
-                rate_limit_enabled_checkbox,
-                ft.Row(
-                    [requests_per_minute_field, requests_per_hour_field],
-                    alignment=ft.MainAxisAlignment.START,
-                ),
-                ft.Row(
-                    [requests_per_day_field],
-                    alignment=ft.MainAxisAlignment.START,
-                ),
                 
                 ft.Divider(),
                 
