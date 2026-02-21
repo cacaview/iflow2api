@@ -1,6 +1,6 @@
 [project]
 name = "iflow2api"
-version = "1.5.8"
+version = "1.5.9"
 description = "将 iFlow CLI 的 AI 服务暴露为 OpenAI 兼容 API"
 readme = "README.md"
 license = {text = "MIT"}
