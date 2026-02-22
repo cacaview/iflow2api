@@ -32,6 +32,10 @@ class IFlowConfig(BaseModel):
     oauth_expires_at: Optional[datetime] = Field(
         default=None, description="OAuth token 过期时间"
     )
+    # apiKey 过期时间（与 oauth_expires_at 相同，用于清晰语义）
+    api_key_expires_at: Optional[datetime] = Field(
+        default=None, description="apiKey 过期时间（OAuth 模式下与 token 同步）"
+    )
 
 
 def get_iflow_config_path() -> Path:
@@ -111,6 +115,9 @@ def load_iflow_config() -> IFlowConfig:
         except Exception:
             pass
 
+    # apiKey 过期时间（OAuth 模式下与 oauth_expires_at 相同）
+    api_key_expires_at = oauth_expires_at
+
     return IFlowConfig(
         api_key=api_key,
         base_url=base_url,
@@ -121,6 +128,7 @@ def load_iflow_config() -> IFlowConfig:
         oauth_access_token=data.get("oauth_access_token"),
         oauth_refresh_token=data.get("oauth_refresh_token"),
         oauth_expires_at=oauth_expires_at,
+        api_key_expires_at=api_key_expires_at,
     )
 
 
@@ -190,6 +198,8 @@ def save_iflow_config(config: IFlowConfig) -> None:
         existing_data["oauth_refresh_token"] = config.oauth_refresh_token
     if config.oauth_expires_at is not None:
         existing_data["oauth_expires_at"] = config.oauth_expires_at.isoformat()
+    if config.api_key_expires_at is not None:
+        existing_data["api_key_expires_at"] = config.api_key_expires_at.isoformat()
 
     # 保存到文件
     with open(config_path, "w", encoding="utf-8") as f:

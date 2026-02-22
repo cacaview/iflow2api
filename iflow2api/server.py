@@ -130,6 +130,7 @@ class ServerManager:
                 port=self._settings.port,
                 log_level="info",
                 access_log=True,
+                log_config=None,  # 不覆盖我们在 logging_setup 中配置的日志 handler
             )
 
             self._server = uvicorn.Server(config)

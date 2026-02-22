@@ -72,6 +72,7 @@ class IFlowOAuth:
                 "Content-Type": "application/x-www-form-urlencoded",
                 "Accept": "application/json",
                 "Authorization": f"Basic {credentials}",
+                "User-Agent": "iFlow-Cli",
             },
         )
         response.raise_for_status()
@@ -88,7 +89,11 @@ class IFlowOAuth:
         return token_data
 
     async def refresh_token(self, refresh_token: str) -> Dict[str, Any]:
-        """刷新 token"""
+        """刷新 token
+        
+        注意：iFlow 服务器可能返回 HTTP 200 但响应体中 success=false 的情况，
+        这通常表示服务器过载，需要重试。
+        """
         client = await self._get_client()
 
         credentials = base64.b64encode(
@@ -107,6 +112,7 @@ class IFlowOAuth:
                 "Content-Type": "application/x-www-form-urlencoded",
                 "Accept": "application/json",
                 "Authorization": f"Basic {credentials}",
+                "User-Agent": "iFlow-Cli",
             },
         )
 
@@ -118,6 +124,16 @@ class IFlowOAuth:
         response.raise_for_status()
 
         token_data = response.json()
+
+        # 检查 iFlow 特有的响应格式：HTTP 200 但 success=false
+        if token_data.get("success") is False:
+            error_msg = token_data.get("message", "未知错误")
+            error_code = token_data.get("code", "")
+            # 服务器过载错误，需要重试
+            if "太多" in error_msg or error_code == "500":
+                raise ValueError(f"服务器过载: {error_msg}")
+            else:
+                raise ValueError(f"OAuth 刷新失败: {error_msg}")
 
         if "access_token" not in token_data:
             raise ValueError("OAuth 响应缺少 access_token")
@@ -150,6 +166,7 @@ class IFlowOAuth:
             f"{self.USER_INFO_URL}?accessToken={access_token}",
             headers={
                 "Accept": "application/json",
+                "User-Agent": "iFlow-Cli",
             },
         )
 

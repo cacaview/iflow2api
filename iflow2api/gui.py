@@ -20,6 +20,7 @@ from .settings import (
 from .server import ServerManager, ServerState
 from .tray import TrayManager, is_tray_available
 from .i18n import t, set_language, get_available_languages
+from .logging_setup import setup_file_logging, add_gui_log_handler, remove_gui_log_handler
 from .updater import (
     get_current_version,
     check_for_updates,
@@ -36,6 +37,12 @@ class IFlow2ApiApp:
     def __init__(self, page: ft.Page):
         self.page = page
         self.settings = load_settings()
+
+        # 初始化文件日志（使 Web /admin/logs 接口可读到运行日志）
+        setup_file_logging()
+        # 将 logging 记录实时转发到 GUI 日志列表
+        add_gui_log_handler(page)
+
         logger.debug("初始化应用, close_action=%s", self.settings.close_action)
 
         # 设置语言
@@ -202,7 +209,10 @@ class IFlow2ApiApp:
             return
         self._is_quitting_process = True
         self._is_quitting = True
-        
+
+        # 移除 GUI 日志 handler，避免向已销毁的 page 发送消息
+        remove_gui_log_handler(self.page)
+
         # 停止服务和托盘
         if hasattr(self, "server"):
             self.server.stop()
@@ -427,6 +437,9 @@ class IFlow2ApiApp:
 
     def _add_log(self, message: str):
         """添加日志"""
+        # log_list 在 _build_ui() 中创建，防御性检查避免过早调用崩溃
+        if self.log_list is None:
+            return
         timestamp = datetime.now().strftime("%H:%M:%S")
         self.log_list.controls.append(
             ft.Text(f"[{timestamp}] {message}", size=12, selectable=True)

@@ -1691,6 +1691,10 @@ def main():
     import argparse
     import uvicorn
     from .settings import load_settings
+    from .logging_setup import setup_file_logging
+
+    # 初始化文件日志（CLI 模式：日志同时写入文件和终端）
+    setup_file_logging()
 
     # 解析命令行参数
     parser = argparse.ArgumentParser(
@@ -1751,6 +1755,7 @@ def main():
             host=host,
             port=port,
             reload=False,
+            log_config=None,  # 不覆盖我们在 setup_file_logging() 中配置的日志 handler
         )
     except OSError as e:
         # 端口冲突友好提示
